@@ -1,0 +1,190 @@
+name: 'Terraform and Policy Check'
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - '**.tf'
+      - '**.hcl'
+      - '**.sentinel'
+      - '**.rego'
+  push:
+    branches: [ main ]
+    paths:
+      - '**.tf'
+      - '**.hcl'
+      - '**.sentinel'
+      - '**.rego'
+
+jobs:
+  validate:
+    name: 'Validate Terraform and Policies'
+    runs-on: ubuntu-latest
+    
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: 'us-west-2'
+      TERRAFORM_CLOUD_TOKEN: ${{ secrets.TF_CLOUD_TOKEN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: "1.5.0"
+          cli_config_credentials_token: ${{ secrets.TF_CLOUD_TOKEN }}
+
+      - name: Setup Sentinel
+        run: |
+          wget https://releases.hashicorp.com/sentinel/0.18.4/sentinel_0.18.4_linux_amd64.zip
+          unzip sentinel_0.18.4_linux_amd64.zip
+          sudo mv sentinel /usr/local/bin/
+          rm sentinel_0.18.4_linux_amd64.zip
+
+      - name: Setup OPA
+        run: |
+          curl -L -o opa https://openpolicyagent.org/downloads/v0.42.0/opa_linux_amd64
+          chmod 755 opa
+          sudo mv opa /usr/local/bin/
+
+      - name: Terraform Format
+        id: fmt
+        run: terraform fmt -check -diff -recursive
+        continue-on-error: true
+
+      - name: Terraform Init
+        id: init
+        run: terraform init -backend=false
+
+      - name: Terraform Validate
+        id: validate
+        run: terraform validate
+
+      - name: Terraform Plan
+        id: plan
+        run: |
+          terraform plan -out=tfplan -input=false
+          terraform show -json tfplan > plan.json
+        continue-on-error: true
+
+      - name: Run Sentinel Tests
+        id: sentinel
+        if: success() || failure()  # Run even if Terraform plan fails
+        run: |
+          echo "Running Sentinel policy checks..."
+          cd policies/sentinel
+          sentinel test
+          echo "Sentinel test results:" > sentinel-results.txt
+          for f in *.sentinel; do
+            echo "Testing $f..." >> sentinel-results.txt
+            sentinel apply "$f" >> sentinel-results.txt 2>&1 || true
+          done
+        continue-on-error: true
+
+      - name: Run OPA Tests
+        id: opa
+        if: success() || failure()  # Run even if Terraform plan fails
+        run: |
+          echo "Running OPA policy checks..."
+          cd policies/opa
+          echo "OPA test results:" > opa-results.txt
+          opa eval --data . --input ../../plan.json --format pretty "data.terraform.deny" >> opa-results.txt 2>&1 || true
+        continue-on-error: true
+
+      - name: Update Pull Request
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v6
+        env:
+          PLAN: "${{ steps.plan.outputs.stdout }}"
+          SENTINEL_RESULTS: "${{ steps.sentinel.outputs.stdout }}"
+          OPA_RESULTS: "${{ steps.opa.outputs.stdout }}"
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            
+            // Read results files
+            const sentinelResults = fs.readFileSync('policies/sentinel/sentinel-results.txt', 'utf8');
+            const opaResults = fs.readFileSync('policies/opa/opa-results.txt', 'utf8');
+            
+            // Format the comment
+            const output = `### Terraform and Policy Check Results
+            
+            #### Terraform Format and Style 🎨
+            \`${{ steps.fmt.outcome }}\`
+            
+            #### Terraform Initialization ⚙️
+            \`${{ steps.init.outcome }}\`
+            
+            #### Terraform Plan 📖
+            \`${{ steps.plan.outcome }}\`
+            
+            <details><summary>Show Plan</summary>
+            
+            \`\`\`\n
+            ${process.env.PLAN}
+            \`\`\`
+            
+            </details>
+            
+            #### Sentinel Policy Results 🛡️
+            
+            <details><summary>Show Sentinel Results</summary>
+            
+            \`\`\`\n
+            ${sentinelResults}
+            \`\`\`
+            
+            </details>
+            
+            #### OPA Policy Results 🔍
+            
+            <details><summary>Show OPA Results</summary>
+            
+            \`\`\`\n
+            ${opaResults}
+            \`\`\`
+            
+            </details>
+            
+            *Pushed by: @${{ github.actor }}, Action: \`${{ github.event_name }}\`*`;
+            
+            // Find existing comment
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            
+            const botComment = comments.data.find(comment => {
+              return comment.user.type === 'Bot' && comment.body.includes('Terraform and Policy Check Results');
+            });
+            
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: output
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: output
+              });
+            }
+
+      - name: Terraform Plan Status
+        if: steps.plan.outcome == 'failure'
+        run: exit 1
+
+      - name: Policy Check Status
+        if: steps.sentinel.outcome == 'failure' || steps.opa.outcome == 'failure'
+        run: |
+          echo "Policy checks failed!"
+          exit 1

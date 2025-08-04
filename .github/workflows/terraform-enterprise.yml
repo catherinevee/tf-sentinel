@@ -1,0 +1,65 @@
+name: 'Terraform Enterprise Policy Check'
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - '**.tf'
+      - '**.hcl'
+
+jobs:
+  tfe-policy:
+    name: 'Terraform Enterprise Policy Check'
+    runs-on: ubuntu-latest
+    
+    env:
+      TF_WORKSPACE: ${{ github.event.repository.name }}
+      TF_TOKEN_app_terraform_io: ${{ secrets.TF_CLOUD_TOKEN }}
+      
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: "1.5.0"
+          cli_config_credentials_token: ${{ secrets.TF_CLOUD_TOKEN }}
+          
+      - name: Terraform Init
+        id: init
+        run: terraform init
+        
+      - name: Terraform Format
+        id: fmt
+        run: terraform fmt -check -diff -recursive
+        
+      - name: Terraform Plan
+        id: plan
+        run: terraform plan
+        # Terraform Cloud/Enterprise will automatically run policy checks
+        
+      - name: Update Pull Request
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const output = `### Terraform Enterprise Policy Check Results
+            
+            #### Terraform Format and Style 🎨
+            \`${{ steps.fmt.outcome }}\`
+            
+            #### Terraform Plan 📖
+            \`${{ steps.plan.outcome }}\`
+            
+            *Note: Detailed policy check results are available in Terraform Enterprise dashboard*
+            
+            *Pushed by: @${{ github.actor }}, Action: \`${{ github.event_name }}\`*`;
+            
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: output
+            });

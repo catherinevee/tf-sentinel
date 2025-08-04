@@ -1,0 +1,187 @@
+name: 'Terragrunt and Policy Check'
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - '**.hcl'
+      - '**.tf'
+      - '**.sentinel'
+      - '**.rego'
+  push:
+    branches: [ main ]
+    paths:
+      - '**.hcl'
+      - '**.tf'
+      - '**.sentinel'
+      - '**.rego'
+
+jobs:
+  terragrunt:
+    name: 'Terragrunt and Policy Check'
+    runs-on: ubuntu-latest
+    
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: 'us-west-2'
+      TERRAFORM_CLOUD_TOKEN: ${{ secrets.TF_CLOUD_TOKEN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: "1.5.0"
+          cli_config_credentials_token: ${{ secrets.TF_CLOUD_TOKEN }}
+
+      - name: Setup Terragrunt
+        run: |
+          TERRAGRUNT_VERSION=v0.48.0
+          wget https://github.com/gruntwork-io/terragrunt/releases/download/${TERRAGRUNT_VERSION}/terragrunt_linux_amd64
+          chmod +x terragrunt_linux_amd64
+          sudo mv terragrunt_linux_amd64 /usr/local/bin/terragrunt
+
+      - name: Setup OPA
+        run: |
+          curl -L -o opa https://openpolicyagent.org/downloads/v0.42.0/opa_linux_amd64
+          chmod 755 opa
+          sudo mv opa /usr/local/bin/
+
+      - name: Install jq
+        run: sudo apt-get install -y jq
+
+      - name: Terragrunt Format
+        id: fmt
+        run: |
+          terragrunt hclfmt -check
+          terraform fmt -check -diff -recursive
+        continue-on-error: true
+
+      - name: Terragrunt Validate
+        id: validate
+        run: |
+          echo "Validating all Terragrunt configurations..."
+          find . -type f -name "terragrunt.hcl" -exec dirname {} \; | while read dir; do
+            echo "Validating $dir"
+            cd $dir
+            terragrunt validate
+            cd -
+          done
+
+      - name: Run Policy Checks
+        id: policy
+        run: |
+          echo "Running policy checks for all environments..."
+          
+          # Create results directory
+          mkdir -p policy-results
+          
+          # Function to run policy checks
+          run_policy_check() {
+            local env_dir=$1
+            local env_name=$(basename $env_dir)
+            
+            echo "Checking environment: $env_name"
+            
+            # Generate plan
+            cd $env_dir
+            terragrunt plan -out=tfplan || return 1
+            terragrunt show -json tfplan > plan.json || return 1
+            
+            # Run OPA checks
+            echo "OPA results for $env_name:" > ../../policy-results/${env_name}_opa.txt
+            opa eval --data ../../policies/opa --input plan.json --format pretty "data.terraform.deny" >> ../../policy-results/${env_name}_opa.txt 2>&1
+            
+            # Cleanup
+            rm -f tfplan plan.json
+            cd - > /dev/null
+          }
+          
+          # Find and check all environments
+          find . -type f -name "terragrunt.hcl" -exec dirname {} \; | while read dir; do
+            if [[ $dir == */env/* ]]; then
+              run_policy_check $dir
+            fi
+          done
+        continue-on-error: true
+
+      - name: Update Pull Request
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            
+            // Read all policy results
+            const policyResults = {};
+            const resultsDir = 'policy-results';
+            fs.readdirSync(resultsDir).forEach(file => {
+              const envName = path.basename(file, '_opa.txt');
+              policyResults[envName] = fs.readFileSync(path.join(resultsDir, file), 'utf8');
+            });
+            
+            // Format the comment
+            let output = `### Terragrunt and Policy Check Results
+            
+            #### Terragrunt Format and Style 🎨
+            \`${{ steps.fmt.outcome }}\`
+            
+            #### Terragrunt Validation ⚙️
+            \`${{ steps.validate.outcome }}\`
+            
+            #### Policy Check Results 🔍
+            
+            `;
+            
+            // Add results for each environment
+            Object.entries(policyResults).forEach(([env, results]) => {
+              output += `<details><summary>Show ${env} Environment Results</summary>
+              
+              \`\`\`
+              ${results}
+              \`\`\`
+              
+              </details>
+              
+              `;
+            });
+            
+            output += `*Pushed by: @${{ github.actor }}, Action: \`${{ github.event_name }}\`*`;
+            
+            // Find existing comment
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            
+            const botComment = comments.data.find(comment => {
+              return comment.user.type === 'Bot' && comment.body.includes('Terragrunt and Policy Check Results');
+            });
+            
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: output
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: output
+              });
+            }
+
+      - name: Check Policy Status
+        if: steps.policy.outcome == 'failure'
+        run: |
+          echo "Policy checks failed!"
+          exit 1

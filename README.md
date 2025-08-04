@@ -22,6 +22,65 @@ This repository contains Sentinel and Open Policy Agent (OPA) policies for enfor
 - OPA CLI
 - conftest (optional, for easier testing)
 
+### For Terragrunt:
+- Terragrunt CLI
+- Terraform CLI
+- jq (for JSON processing)
+
+## Terragrunt Integration
+
+1. **Directory Structure**:
+   ```
+   .
+   ├── terragrunt.hcl
+   ├── env
+   │   ├── prod
+   │   │   └── terragrunt.hcl
+   │   └── dev
+   │       └── terragrunt.hcl
+   └── policies
+       ├── sentinel
+       │   └── sentinel.hcl
+       └── opa
+           └── policy.rego
+   ```
+
+2. **Terragrunt Configuration**:
+   ```hcl
+   # terragrunt.hcl
+   terraform {
+     before_hook "policy_check" {
+       commands = ["plan", "apply"]
+       execute  = [
+         "bash", "-c",
+         <<-EOF
+           terragrunt show -json \
+           | opa eval --format pretty \
+             --data policies/opa \
+             --input - \
+             "data.terraform.deny"
+         EOF
+       ]
+     }
+   }
+   ```
+
+3. **Running Policy Checks**:
+   ```bash
+   # Run Terragrunt with policy checks
+   terragrunt plan
+   
+   # Run specific environment
+   cd env/prod
+   terragrunt plan
+   ```
+
+4. **Policy Output Processing**:
+   ```bash
+   # Get policy violations for specific environment
+   terragrunt show -json | jq -r '.resource_changes[] | select(.change.actions[] | contains("create"))'
+   ```
+
 ## Sentinel Integration
 
 1. **Configure Sentinel in Terraform Enterprise/Cloud**:
@@ -102,16 +161,154 @@ deny[msg] {
 
 ### Workflow Integration
 
-1. **CI/CD Pipeline**:
+1. **GitHub Actions Workflow**:
+
    ```yaml
-   terraform_plan:
-     steps:
-       - terraform plan -out=tfplan
-       - terraform show -json tfplan > plan.json
-       - conftest test plan.json
+   name: 'Terraform Plan and Policy Check'
+   
+   on:
+     pull_request:
+       branches: [ main ]
+     push:
+       branches: [ main ]
+   
+   jobs:
+     terraform:
+       name: 'Terraform and Policy Check'
+       runs-on: ubuntu-latest
+       
+       env:
+         AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+         AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+         TERRAFORM_CLOUD_TOKEN: ${{ secrets.TF_CLOUD_TOKEN }}
+   
+       steps:
+         # Checkout the repository
+         - name: Checkout
+           uses: actions/checkout@v2
+   
+         # Install Terraform
+         - name: Setup Terraform
+           uses: hashicorp/setup-terraform@v1
+           with:
+             terraform_version: 1.0.0
+             cli_config_credentials_token: ${{ secrets.TF_CLOUD_TOKEN }}
+   
+         # Install Sentinel
+         - name: Setup Sentinel
+           run: |
+             wget https://releases.hashicorp.com/sentinel/0.18.4/sentinel_0.18.4_linux_amd64.zip
+             unzip sentinel_0.18.4_linux_amd64.zip
+             sudo mv sentinel /usr/local/bin/
+   
+         # Install OPA
+         - name: Setup OPA
+           run: |
+             curl -L -o opa https://openpolicyagent.org/downloads/v0.42.0/opa_linux_amd64
+             chmod 755 opa
+             sudo mv opa /usr/local/bin/
+   
+         # Terraform Format Check
+         - name: Terraform Format
+           run: terraform fmt -check
+   
+         # Terraform Init
+         - name: Terraform Init
+           run: terraform init
+   
+         # Terraform Validate
+         - name: Terraform Validate
+           run: terraform validate
+   
+         # Terraform Plan
+         - name: Terraform Plan
+           run: |
+             terraform plan -out=tfplan
+             terraform show -json tfplan > plan.json
+   
+         # Sentinel Policy Check
+         - name: Sentinel Policy Check
+           run: |
+             cd policies/sentinel
+             sentinel test
+             for f in *.sentinel; do
+               sentinel apply "$f"
+             done
+   
+         # OPA Policy Check
+         - name: OPA Policy Check
+           run: |
+             cd policies/opa
+             opa eval --data . --input ../../plan.json --format pretty "data.terraform.deny"
+   
+         # Comment Policy Results on PR
+         - name: Comment Policy Results
+           if: github.event_name == 'pull_request'
+           uses: actions/github-script@v4
+           with:
+             github-token: ${{ secrets.GITHUB_TOKEN }}
+             script: |
+               const fs = require('fs');
+               const sentinelResults = fs.readFileSync('sentinel-results.txt', 'utf8');
+               const opaResults = fs.readFileSync('opa-results.txt', 'utf8');
+               
+               const body = `### Policy Check Results
+               
+               #### Sentinel Policies
+               \`\`\`
+               ${sentinelResults}
+               \`\`\`
+               
+               #### OPA Policies
+               \`\`\`
+               ${opaResults}
+               \`\`\``;
+               
+               github.issues.createComment({
+                 issue_number: context.issue.number,
+                 owner: context.repo.owner,
+                 repo: context.repo.repo,
+                 body: body
+               });
+
    ```
 
-2. **Pre-commit Hooks**:
+2. **Terraform Enterprise/Cloud Integration**:
+
+   ```yaml
+   name: 'Terraform Enterprise Policy Check'
+   
+   on:
+     pull_request:
+       branches: [ main ]
+   
+   jobs:
+     terraform:
+       name: 'Terraform Enterprise Policy Check'
+       runs-on: ubuntu-latest
+       
+       env:
+         TF_TOKEN_app_terraform_io: ${{ secrets.TF_CLOUD_TOKEN }}
+         
+       steps:
+         - name: Checkout
+           uses: actions/checkout@v2
+           
+         - name: Setup Terraform
+           uses: hashicorp/setup-terraform@v1
+           with:
+             cli_config_credentials_token: ${{ secrets.TF_CLOUD_TOKEN }}
+             
+         - name: Terraform Init
+           run: terraform init
+           
+         - name: Terraform Plan
+           run: terraform plan
+           # Terraform Cloud/Enterprise will automatically run policy checks
+           # Results will be reported back to the GitHub PR
+   ```
+
+3. **Pre-commit Hooks**:
    ```yaml
    repos:
      - repo: local
