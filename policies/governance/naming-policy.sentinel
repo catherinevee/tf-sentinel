@@ -1,0 +1,105 @@
+# Policy: Resource Naming Policy
+# Purpose: Enforces consistent resource naming conventions
+# Scope: All resources
+# Enforcement: hard-mandatory
+#
+# Validates:
+# - Naming pattern compliance
+# - Required prefixes/suffixes
+# - Environment-specific naming
+# - Character restrictions
+
+import "tfplan/v2" as tfplan
+import "tfstate/v2" as tfstate
+import "tfconfig/v2" as tfconfig
+import "strings"
+
+# Parameters with secure defaults
+param naming_patterns default {
+    "aws_s3_bucket": "^(?P<env>[a-z]+)-(?P<service>[a-z]+)-(?P<purpose>[a-z]+)-[a-z0-9-]+$",
+    "aws_dynamodb_table": "^(?P<env>[a-z]+)-(?P<service>[a-z]+)-[a-z0-9-]+$",
+    "aws_lambda_function": "^(?P<env>[a-z]+)-(?P<service>[a-z]+)-(?P<function>[a-z0-9-]+)$"
+}
+
+param required_prefixes default {
+    "prod": "prd",
+    "staging": "stg",
+    "dev": "dev"
+}
+
+# Helper function to validate resource names
+validate_resource_name = func(resource) {
+    violations = []
+    
+    if resource is null {
+        print("Error: Resource is null")
+        return false
+    }
+
+    # Get resource name based on type
+    resource_name = ""
+    if resource.type is "aws_s3_bucket" {
+        resource_name = resource.change.after.bucket else ""
+    } else {
+        resource_name = resource.change.after.name else ""
+    }
+
+    # Validate name is not empty
+    if length(resource_name) == 0 {
+        append(violations, "Resource name cannot be empty")
+        return false
+    }
+
+    # Check resource type has a pattern defined
+    if resource.type in keys(naming_patterns) {
+        pattern = naming_patterns[resource.type]
+        
+        # Validate against pattern
+        if resource_name not matches pattern {
+            append(violations, "Resource name does not match required pattern: " + pattern)
+        }
+
+        # Extract environment from name and validate prefix
+        env_match = strings.split(resource_name, "-")[0]
+        if env_match in keys(required_prefixes) {
+            required_prefix = required_prefixes[env_match]
+            if not strings.has_prefix(resource_name, required_prefix) {
+                append(violations, "Resource name must start with environment prefix: " + required_prefix)
+            }
+        }
+    }
+
+    # Validate length restrictions
+    if length(resource_name) > 63 {
+        append(violations, "Resource name exceeds maximum length of 63 characters")
+    }
+
+    # Validate character restrictions
+    if resource_name not matches "^[a-z0-9-]+$" {
+        append(violations, "Resource name can only contain lowercase letters, numbers, and hyphens")
+    }
+
+    # Log violations
+    if length(violations) > 0 {
+        print("Naming convention violations for", resource.address + ":")
+        for violations as violation {
+            print("  -", violation)
+        }
+        return false
+    }
+
+    return true
+}
+
+# Filter all managed resources
+resources = filter tfplan.resource_changes as _, rc {
+    rc.mode is "managed" and
+    rc.change.actions is not ["delete"]
+}
+
+# Main rule enforcing naming conventions
+main = rule {
+    all resources as _, resource {
+        validate_resource_name(resource)
+    }
+}

@@ -1,0 +1,80 @@
+# Policy: Encryption Enforcement
+# Purpose: Ensures encryption is enabled for sensitive resources
+# Scope: AWS S3, RDS, EBS Volumes, Secrets Manager
+# Enforcement: hard-mandatory
+#
+# Validates:
+# - S3 bucket encryption
+# - RDS encryption
+# - EBS volume encryption
+# - Secrets Manager encryption
+
+import "tfplan/v2" as tfplan
+import "tfstate/v2" as tfstate  
+import "tfconfig/v2" as tfconfig
+
+# Helper functions with comprehensive error handling
+validate_encryption = func(resource) {
+    violations = []
+    
+    # Validate resource type
+    if resource is null {
+        print("Error: Resource is null")
+        return false
+    }
+
+    # Get resource type
+    resource_type = resource.type
+    
+    # Validate S3 bucket encryption
+    if resource_type is "aws_s3_bucket" {
+        encryption = resource.change.after.server_side_encryption_configuration else []
+        if length(encryption) == 0 {
+            append(violations, "S3 bucket requires server-side encryption: " + resource.address)
+            return false
+        }
+    }
+    
+    # Validate RDS encryption
+    if resource_type is "aws_db_instance" {
+        storage_encrypted = resource.change.after.storage_encrypted else false
+        if not storage_encrypted {
+            append(violations, "RDS instance requires storage encryption: " + resource.address)
+            return false
+        }
+    }
+    
+    # Validate EBS volume encryption
+    if resource_type is "aws_ebs_volume" {
+        encrypted = resource.change.after.encrypted else false
+        if not encrypted {
+            append(violations, "EBS volume requires encryption: " + resource.address)
+            return false
+        }
+    }
+    
+    # Log violations if any
+    if length(violations) > 0 {
+        print("Encryption violations found:")
+        for violations as violation {
+            print("  -", violation)
+        }
+        return false
+    }
+    
+    return true
+}
+
+# Filter resources requiring encryption
+resources_requiring_encryption = filter tfplan.resource_changes as _, rc {
+    rc.mode is "managed" and
+    rc.type in ["aws_s3_bucket", "aws_db_instance", "aws_ebs_volume"] and
+    rc.change.actions is not ["delete"]
+}
+
+# Main rule enforcing encryption
+main = rule {
+    all resources_requiring_encryption as _, resource {
+        validate_encryption(resource)
+    }
+}

@@ -1,0 +1,84 @@
+# Policy: Main Policy Enforcement
+# Purpose: Main sentinel policy that imports and enforces all child policies
+# Scope: All resources
+# Enforcement: hard-mandatory
+#
+# Validates:
+# - All security policies
+# - All cost control policies
+# - All compliance policies
+
+# Import common functions and rules
+import "tfplan/v2" as tfplan
+import "tfstate/v2" as tfstate  
+import "tfconfig/v2" as tfconfig
+import "tfrun" as tfrun
+
+# Import child policies
+# Security policies
+import "policies/security/encryption-policy" as encryption
+import "policies/security/network-policy" as network
+import "policies/security/data-protection-policy" as data_protection
+import "policies/security/iam-policy" as iam
+
+# Cost policies
+import "policies/cost/cost-policy" as cost
+
+# Compliance policies
+import "policies/compliance/compliance-policy" as compliance
+import "policies/compliance/disaster-recovery-policy" as dr
+
+# Governance policies
+import "policies/governance/naming-policy" as naming
+import "policies/governance/region-policy" as region
+import "policies/governance/service-limits-policy" as service_limits
+
+# Performance policies
+import "policies/performance/scaling-policy" as scaling
+
+# Monitoring policies
+import "policies/monitoring/observability-policy" as observability
+
+# Architecture policies
+import "policies/architecture/best-practices-policy" as architecture
+
+# Deployment policies
+import "policies/deployment/change-management-policy" as change_management
+
+# Parameters with secure defaults
+param environment default "dev"
+
+# Main rule enforcing all policies
+main = rule {
+    all [
+        # Security policies
+        encryption.main,
+        network.main,
+        data_protection.main,
+        iam.main,
+        
+        # Cost policies
+        cost.main,
+        
+        # Compliance policies
+        compliance.main,
+        dr.main,
+        
+        # Governance policies
+        naming.main,
+        region.main,
+        service_limits.main,
+        
+        # Performance policies
+        scaling.main,
+        
+        # Monitoring policies
+        observability.main,
+        
+        # Architecture policies
+        architecture.main,
+        
+        # Deployment policies
+        change_management.main
+    ]
+}

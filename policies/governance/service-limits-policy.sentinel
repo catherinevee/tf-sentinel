@@ -1,0 +1,175 @@
+# Policy: Service Limits Policy
+# Purpose: Prevents resource creation that would exceed service limits
+# Scope: All resources with service quotas
+# Enforcement: hard-mandatory
+#
+# Validates:
+# - Service quota limits
+# - Resource count thresholds
+# - Regional limits
+# - Account-wide limits
+
+import "tfplan/v2" as tfplan
+import "tfstate/v2" as tfstate
+import "tfconfig/v2" as tfconfig
+
+# Parameters with secure defaults
+param service_quotas default {
+    "aws_vpc": {
+        "per_region": 5
+    },
+    "aws_eip": {
+        "per_region": 5
+    },
+    "aws_nat_gateway": {
+        "per_vpc": 3
+    },
+    "aws_internet_gateway": {
+        "per_vpc": 1
+    },
+    "aws_route_table": {
+        "per_vpc": 20
+    }
+}
+
+param resource_thresholds default {
+    "aws_instance": {
+        "per_subnet": 20,
+        "per_vpc": 100
+    },
+    "aws_lambda_function": {
+        "per_region": 500
+    },
+    "aws_security_group": {
+        "per_vpc": 50
+    }
+}
+
+# Helper function to validate service limits
+validate_service_limits = func(resource) {
+    violations = []
+    
+    if resource is null {
+        print("Error: Resource is null")
+        return false
+    }
+
+    # Get current resource counts
+    resource_type = resource.type
+    region = get_resource_region(resource)
+    vpc_id = get_resource_vpc(resource)
+
+    # Check region-based quotas
+    if resource_type in keys(service_quotas) {
+        quota = service_quotas[resource_type]
+        if "per_region" in keys(quota) {
+            current_count = count_resources_in_region(resource_type, region)
+            if current_count >= quota.per_region {
+                append(violations, "Would exceed " + resource_type + 
+                      " limit of " + string(quota.per_region) + 
+                      " in region " + region)
+            }
+        }
+
+        # Check VPC-based quotas
+        if vpc_id is not null and "per_vpc" in keys(quota) {
+            current_count = count_resources_in_vpc(resource_type, vpc_id)
+            if current_count >= quota.per_vpc {
+                append(violations, "Would exceed " + resource_type + 
+                      " limit of " + string(quota.per_vpc) + 
+                      " in VPC " + vpc_id)
+            }
+        }
+    }
+
+    # Check resource thresholds
+    if resource_type in keys(resource_thresholds) {
+        threshold = resource_thresholds[resource_type]
+        
+        # Check subnet-based thresholds
+        if "per_subnet" in keys(threshold) {
+            subnet_id = get_resource_subnet(resource)
+            if subnet_id is not null {
+                current_count = count_resources_in_subnet(resource_type, subnet_id)
+                if current_count >= threshold.per_subnet {
+                    append(violations, "Would exceed " + resource_type + 
+                          " threshold of " + string(threshold.per_subnet) + 
+                          " in subnet " + subnet_id)
+                }
+            }
+        }
+    }
+
+    # Log violations
+    if length(violations) > 0 {
+        print("Service limit violations for", resource.address + ":")
+        for violations as violation {
+            print("  -", violation)
+        }
+        return false
+    }
+
+    return true
+}
+
+# Helper functions for resource counting
+count_resources_in_region = func(type, region) {
+    resources = filter tfplan.resource_changes as _, rc {
+        rc.type is type and
+        get_resource_region(rc) is region
+    }
+    return length(resources)
+}
+
+count_resources_in_vpc = func(type, vpc_id) {
+    resources = filter tfplan.resource_changes as _, rc {
+        rc.type is type and
+        get_resource_vpc(rc) is vpc_id
+    }
+    return length(resources)
+}
+
+count_resources_in_subnet = func(type, subnet_id) {
+    resources = filter tfplan.resource_changes as _, rc {
+        rc.type is type and
+        get_resource_subnet(rc) is subnet_id
+    }
+    return length(resources)
+}
+
+# Helper functions for resource metadata
+get_resource_region = func(resource) {
+    if "provider_config" in keys(resource) {
+        if "region" in keys(resource.provider_config) {
+            return resource.provider_config.region
+        }
+    }
+    return null
+}
+
+get_resource_vpc = func(resource) {
+    if "vpc_id" in keys(resource.change.after) {
+        return resource.change.after.vpc_id
+    }
+    return null
+}
+
+get_resource_subnet = func(resource) {
+    if "subnet_id" in keys(resource.change.after) {
+        return resource.change.after.subnet_id
+    }
+    return null
+}
+
+# Filter all managed resources
+resources = filter tfplan.resource_changes as _, rc {
+    rc.mode is "managed" and
+    rc.change.actions is not ["delete"]
+}
+
+# Main rule enforcing service limits
+main = rule {
+    all resources as _, resource {
+        validate_service_limits(resource)
+    }
+}

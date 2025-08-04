@@ -1,0 +1,190 @@
+# Policy: Architecture Best Practices Policy
+# Purpose: Enforces architectural best practices and patterns
+# Scope: All resources and their relationships
+# Enforcement: soft-mandatory
+#
+# Validates:
+# - Architecture patterns
+# - Service integration patterns
+# - High availability configurations
+# - Scalability requirements
+
+import "tfplan/v2" as tfplan
+import "tfstate/v2" as tfstate
+import "tfconfig/v2" as tfconfig
+
+# Parameters with secure defaults
+param required_patterns default {
+    "web_tier": {
+        "required_components": [
+            "aws_lb",
+            "aws_autoscaling_group",
+            "aws_launch_template"
+        ],
+        "min_az_count": 2
+    },
+    "app_tier": {
+        "required_components": [
+            "aws_ecs_cluster",
+            "aws_ecs_service",
+            "aws_ecs_task_definition"
+        ],
+        "min_task_count": 2
+    },
+    "data_tier": {
+        "required_components": [
+            "aws_db_instance",
+            "aws_elasticache_cluster"
+        ],
+        "multi_az": true
+    }
+}
+
+param integration_patterns default {
+    "api_gateway": {
+        "required_integrations": ["lambda", "vpc_link"],
+        "required_authorizers": true
+    },
+    "event_driven": {
+        "required_components": ["sns", "sqs", "eventbridge"],
+        "dlq_required": true
+    }
+}
+
+# Helper function to validate architecture patterns
+validate_architecture = func(resource_group) {
+    violations = []
+    
+    if resource_group is null {
+        print("Error: Resource group is null")
+        return false
+    }
+
+    # Get environment from context
+    env = get_environment(resource_group)
+
+    # Validate Web Tier
+    if has_web_tier(resource_group) {
+        pattern = required_patterns.web_tier
+        
+        # Check required components
+        for pattern.required_components as component {
+            if not has_resource_type(resource_group, component) {
+                append(violations, "Missing required web tier component: " + component)
+            }
+        }
+        
+        # Validate AZ distribution
+        if count_availability_zones(resource_group) < pattern.min_az_count {
+            append(violations, "Web tier must be deployed across at least " + 
+                  string(pattern.min_az_count) + " availability zones")
+        }
+    }
+
+    # Validate App Tier
+    if has_app_tier(resource_group) {
+        pattern = required_patterns.app_tier
+        
+        # Check ECS configuration
+        ecs_service = get_ecs_service(resource_group)
+        if ecs_service is not null {
+            if ecs_service.change.after.desired_count < pattern.min_task_count {
+                append(violations, "App tier must maintain at least " + 
+                      string(pattern.min_task_count) + " tasks")
+            }
+        }
+    }
+
+    # Validate Data Tier
+    if has_data_tier(resource_group) {
+        pattern = required_patterns.data_tier
+        
+        # Check Multi-AZ configuration
+        if pattern.multi_az {
+            db_instances = get_db_instances(resource_group)
+            for db_instances as db {
+                if not db.change.after.multi_az {
+                    append(violations, "Database instance must be Multi-AZ in " + env)
+                }
+            }
+        }
+    }
+
+    # Validate API Gateway pattern
+    if has_api_gateway(resource_group) {
+        pattern = integration_patterns.api_gateway
+        
+        # Check required integrations
+        api_gateway = get_api_gateway(resource_group)
+        if api_gateway is not null {
+            if not validate_api_integrations(api_gateway, pattern.required_integrations) {
+                append(violations, "API Gateway missing required integration types")
+            }
+            
+            if pattern.required_authorizers and not has_authorizers(api_gateway) {
+                append(violations, "API Gateway must have authorizers configured")
+            }
+        }
+    }
+
+    # Validate Event-Driven pattern
+    if has_event_driven_components(resource_group) {
+        pattern = integration_patterns.event_driven
+        
+        # Check required components
+        for pattern.required_components as component {
+            if not has_resource_type(resource_group, "aws_" + component) {
+                append(violations, "Missing required event-driven component: " + component)
+            }
+        }
+        
+        # Validate DLQ configuration
+        if pattern.dlq_required and not has_dlq_configuration(resource_group) {
+            append(violations, "Event-driven components must have DLQ configured")
+        }
+    }
+
+    # Log violations
+    if length(violations) > 0 {
+        print("Architecture violations:")
+        for violations as violation {
+            print("  -", violation)
+        }
+        return false
+    }
+
+    return true
+}
+
+# Helper functions for architecture validation
+has_web_tier = func(group) {
+    return has_resource_type(group, "aws_lb")
+}
+
+has_app_tier = func(group) {
+    return has_resource_type(group, "aws_ecs_cluster")
+}
+
+has_data_tier = func(group) {
+    return has_resource_type(group, "aws_db_instance")
+}
+
+has_api_gateway = func(group) {
+    return has_resource_type(group, "aws_api_gateway_rest_api")
+}
+
+has_event_driven_components = func(group) {
+    return any required_patterns.event_driven.required_components as component {
+        has_resource_type(group, "aws_" + component)
+    }
+}
+
+# Resource grouping and filtering
+resource_groups = group_resources_by_stack(tfplan.resource_changes)
+
+# Main rule enforcing architecture patterns
+main = rule {
+    all resource_groups as stack_name, resources {
+        validate_architecture(resources)
+    }
+}

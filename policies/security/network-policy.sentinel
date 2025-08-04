@@ -1,0 +1,85 @@
+# Policy: Network Security Controls
+# Purpose: Ensures network security best practices
+# Scope: AWS Security Groups, VPC, NACLs
+# Enforcement: hard-mandatory
+#
+# Validates:
+# - No public SSH/RDP access
+# - Restricted ingress CIDR ranges
+# - Required security group rules
+
+import "tfplan/v2" as tfplan
+import "tfstate/v2" as tfstate  
+import "tfconfig/v2" as tfconfig
+
+# Parameters with secure defaults
+param allowed_ports default ["80", "443"]
+param restricted_ports default ["22", "3389"]
+param trusted_cidrs default ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
+
+# Helper function to validate network security
+validate_network_security = func(security_group) {
+    violations = []
+
+    # Input validation
+    if security_group is null {
+        print("Error: Security group is null")
+        return false
+    }
+
+    # Validate ingress rules
+    ingress_rules = security_group.change.after.ingress else []
+    for ingress_rules as idx, rule {
+        # Type validation
+        if rule is null {
+            print("Error: Ingress rule", idx, "is null")
+            continue
+        }
+
+        # Validate CIDR blocks
+        cidr_blocks = rule.cidr_blocks else []
+        for cidr_blocks as cidr {
+            if cidr is "0.0.0.0/0" {
+                from_port = rule.from_port
+                to_port = rule.to_port
+
+                # Check for restricted ports
+                if from_port in restricted_ports {
+                    append(violations, "Security group " + security_group.address + 
+                          " allows restricted port " + from_port + " from 0.0.0.0/0")
+                }
+
+                # Validate allowed ports
+                if str(from_port) not in allowed_ports {
+                    append(violations, "Security group " + security_group.address + 
+                          " allows unauthorized port " + from_port + " from 0.0.0.0/0")
+                }
+            }
+        }
+    }
+
+    # Log violations
+    if length(violations) > 0 {
+        print("Network security violations found:")
+        for violations as violation {
+            print("  -", violation)
+        }
+        return false
+    }
+
+    return true
+}
+
+# Filter security group resources
+security_groups = filter tfplan.resource_changes as _, rc {
+    rc.mode is "managed" and
+    rc.type is "aws_security_group" and
+    rc.change.actions is not ["delete"]
+}
+
+# Main rule enforcing network security
+main = rule {
+    all security_groups as _, sg {
+        validate_network_security(sg)
+    }
+}

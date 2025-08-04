@@ -1,0 +1,120 @@
+# Policy: Performance and Scaling Policy
+# Purpose: Ensures resources meet performance and scalability requirements
+# Scope: All compute and storage resources
+# Enforcement: soft-mandatory
+#
+# Validates:
+# - Instance sizing requirements
+# - Auto-scaling configurations
+# - Performance tier selection
+# - Resource capacity planning
+
+import "tfplan/v2" as tfplan
+import "tfstate/v2" as tfstate
+import "tfconfig/v2" as tfconfig
+
+# Parameters with secure defaults
+param minimum_autoscaling_size default {
+    "prod": 2,
+    "staging": 1,
+    "dev": 1
+}
+
+param performance_tiers default {
+    "prod": {
+        "db_instance": ["db.r6g.xlarge", "db.r6g.2xlarge"],
+        "cache_node": ["cache.r6g.large", "cache.r6g.xlarge"],
+        "ec2_instance": ["c6g.xlarge", "c6g.2xlarge"]
+    },
+    "staging": {
+        "db_instance": ["db.r6g.large"],
+        "cache_node": ["cache.r6g.large"],
+        "ec2_instance": ["c6g.large"]
+    },
+    "dev": {
+        "db_instance": ["db.t4g.medium"],
+        "cache_node": ["cache.t4g.medium"],
+        "ec2_instance": ["t4g.medium"]
+    }
+}
+
+# Helper function to validate performance configurations
+validate_performance = func(resource) {
+    violations = []
+    
+    if resource is null {
+        print("Error: Resource is null")
+        return false
+    }
+
+    # Get environment from tags
+    tags = resource.change.after.tags else {}
+    env = tags["Environment"] else "dev"
+
+    # Validate Auto Scaling Groups
+    if resource.type is "aws_autoscaling_group" {
+        min_size = resource.change.after.min_size else 0
+        max_size = resource.change.after.max_size else 0
+        
+        if min_size < minimum_autoscaling_size[env] {
+            append(violations, "Minimum ASG size must be at least " + 
+                  string(minimum_autoscaling_size[env]) + " for " + env)
+        }
+        
+        if max_size <= min_size {
+            append(violations, "Maximum ASG size must be greater than minimum size")
+        }
+    }
+
+    # Validate instance types
+    if resource.type in ["aws_instance", "aws_db_instance", "aws_elasticache_cluster"] {
+        instance_type = ""
+        
+        if resource.type is "aws_instance" {
+            instance_type = resource.change.after.instance_type
+            allowed_types = performance_tiers[env]["ec2_instance"]
+        } else if resource.type is "aws_db_instance" {
+            instance_type = resource.change.after.instance_class
+            allowed_types = performance_tiers[env]["db_instance"]
+        } else {
+            instance_type = resource.change.after.node_type
+            allowed_types = performance_tiers[env]["cache_node"]
+        }
+        
+        if instance_type not in allowed_types {
+            append(violations, "Instance type " + instance_type + 
+                  " not allowed in " + env + ". Must be one of: " + 
+                  strings.join(allowed_types, ", "))
+        }
+    }
+
+    # Log violations
+    if length(violations) > 0 {
+        print("Performance and scaling violations for", resource.address + ":")
+        for violations as violation {
+            print("  -", violation)
+        }
+        return false
+    }
+
+    return true
+}
+
+# Filter compute and storage resources
+resources = filter tfplan.resource_changes as _, rc {
+    rc.mode is "managed" and
+    rc.type in [
+        "aws_instance", 
+        "aws_db_instance",
+        "aws_elasticache_cluster",
+        "aws_autoscaling_group"
+    ] and
+    rc.change.actions is not ["delete"]
+}
+
+# Main rule enforcing performance requirements
+main = rule {
+    all resources as _, resource {
+        validate_performance(resource)
+    }
+}

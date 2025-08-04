@@ -1,0 +1,103 @@
+# Policy: Cost Control
+# Purpose: Enforces cost control policies
+# Scope: All billable resources
+# Enforcement: soft-mandatory
+#
+# Validates:
+# - Monthly cost limits
+# - Instance type restrictions
+# - Volume size limits
+# - Resource tagging for cost allocation
+
+import "tfplan/v2" as tfplan
+import "tfrun" as tfrun
+import "decimal"
+
+# Cost thresholds by environment
+param environment_cost_limits default {
+    "prod": 5000,
+    "staging": 1000,
+    "dev": 500,
+    "default": 100
+}
+
+# Instance type restrictions by environment
+param allowed_instance_types default {
+    "prod": ["m5.large", "m5.xlarge", "c5.large", "c5.xlarge"],
+    "dev": ["t3.micro", "t3.small", "t3.medium"],
+    "default": ["t3.micro", "t3.small"]
+}
+
+# Helper function to validate monthly costs
+validate_monthly_costs = func() {
+    # Input validation
+    cost_estimate = tfrun.cost_estimate else null
+    if cost_estimate is null {
+        print("Warning: Cost estimate data not available")
+        return true
+    }
+
+    # Get current environment and cost limit
+    env = coalesce(environment, "default")
+    cost_limit = decimal.new(environment_cost_limits[env])
+    
+    # Calculate monthly costs
+    delta_monthly_cost = decimal.new(cost_estimate.delta_monthly_cost)
+    
+    # Validate against threshold
+    if decimal.gt(delta_monthly_cost, cost_limit) {
+        print("Cost violation: Monthly cost delta", delta_monthly_cost, 
+              "exceeds limit of", cost_limit, "for environment", env)
+        return false
+    }
+
+    return true
+}
+
+# Helper function to validate instance types
+validate_instance_types = func(resource) {
+    violations = []
+    
+    # Input validation
+    if resource is null {
+        print("Error: Resource is null")
+        return false
+    }
+
+    # Get environment and allowed types
+    env = coalesce(environment, "default")
+    allowed_types = allowed_instance_types[env]
+
+    # Validate instance type
+    instance_type = resource.change.after.instance_type else null
+    if instance_type is not null and instance_type not in allowed_types {
+        append(violations, "Instance type " + instance_type + 
+              " not allowed in environment " + env)
+    }
+
+    # Log violations
+    if length(violations) > 0 {
+        print("Instance type violations found:")
+        for violations as violation {
+            print("  -", violation)
+        }
+        return false
+    }
+
+    return true
+}
+
+# Filter EC2 instances
+ec2_instances = filter tfplan.resource_changes as _, rc {
+    rc.mode is "managed" and
+    rc.type is "aws_instance" and
+    rc.change.actions is not ["delete"]
+}
+
+# Main rule combining all cost controls
+main = rule {
+    validate_monthly_costs() and
+    all ec2_instances as _, instance {
+        validate_instance_types(instance)
+    }
+}

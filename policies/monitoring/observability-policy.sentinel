@@ -1,0 +1,135 @@
+# Policy: Monitoring and Observability Policy
+# Purpose: Ensures proper monitoring and observability configurations
+# Scope: All resources
+# Enforcement: hard-mandatory
+#
+# Validates:
+# - CloudWatch logging enabled
+# - Metrics collection configured
+# - Alarm configurations
+# - Tracing setup
+
+import "tfplan/v2" as tfplan
+import "tfstate/v2" as tfstate
+import "tfconfig/v2" as tfconfig
+
+# Parameters with secure defaults
+param required_alarms default {
+    "aws_instance": [
+        "CPUUtilization",
+        "DiskReadOps",
+        "DiskWriteOps"
+    ],
+    "aws_db_instance": [
+        "CPUUtilization",
+        "FreeStorageSpace",
+        "FreeableMemory"
+    ],
+    "aws_elasticache_cluster": [
+        "CPUUtilization",
+        "FreeableMemory",
+        "CacheHits"
+    ]
+}
+
+param log_retention_days default {
+    "prod": 90,
+    "staging": 30,
+    "dev": 14
+}
+
+# Helper function to validate monitoring configuration
+validate_monitoring = func(resource) {
+    violations = []
+    
+    if resource is null {
+        print("Error: Resource is null")
+        return false
+    }
+
+    # Get environment from tags
+    tags = resource.change.after.tags else {}
+    env = tags["Environment"] else "dev"
+
+    # Validate CloudWatch logging
+    if resource.type in ["aws_lambda_function", "aws_ecs_service"] {
+        log_group = resource.change.after.log_group else null
+        if log_group is null {
+            append(violations, "CloudWatch log group must be configured")
+        } else {
+            retention_days = log_group.retention_in_days else 0
+            if retention_days < log_retention_days[env] {
+                append(violations, "Log retention must be at least " + 
+                      string(log_retention_days[env]) + " days for " + env)
+            }
+        }
+    }
+
+    # Validate detailed monitoring
+    if resource.type is "aws_instance" {
+        monitoring = resource.change.after.monitoring else false
+        if not monitoring {
+            append(violations, "Detailed monitoring must be enabled")
+        }
+    }
+
+    # Validate required alarms
+    if resource.type in keys(required_alarms) {
+        required = required_alarms[resource.type]
+        existing_alarms = get_resource_alarms(resource)
+        
+        for required as metric {
+            if metric not in existing_alarms {
+                append(violations, "Required alarm missing for metric: " + metric)
+            }
+        }
+    }
+
+    # Validate X-Ray tracing
+    if resource.type in ["aws_lambda_function", "aws_apigatewayv2_api"] {
+        tracing_config = resource.change.after.tracing_config else null
+        if tracing_config is null or tracing_config.mode is not "Active" {
+            append(violations, "X-Ray tracing must be enabled")
+        }
+    }
+
+    # Log violations
+    if length(violations) > 0 {
+        print("Monitoring violations for", resource.address + ":")
+        for violations as violation {
+            print("  -", violation)
+        }
+        return false
+    }
+
+    return true
+}
+
+# Helper function to get configured alarms for a resource
+get_resource_alarms = func(resource) {
+    alarms = []
+    # This would typically query associated CloudWatch alarms
+    # For now, returning empty list as this requires complex state analysis
+    return alarms
+}
+
+# Filter resources that require monitoring
+resources = filter tfplan.resource_changes as _, rc {
+    rc.mode is "managed" and
+    rc.type in [
+        "aws_instance",
+        "aws_db_instance",
+        "aws_elasticache_cluster",
+        "aws_lambda_function",
+        "aws_ecs_service",
+        "aws_apigatewayv2_api"
+    ] and
+    rc.change.actions is not ["delete"]
+}
+
+# Main rule enforcing monitoring requirements
+main = rule {
+    all resources as _, resource {
+        validate_monitoring(resource)
+    }
+}

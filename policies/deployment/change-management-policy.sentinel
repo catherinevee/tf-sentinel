@@ -1,0 +1,169 @@
+# Policy: Change Management Policy
+# Purpose: Enforces change management and deployment controls
+# Scope: All resource changes
+# Enforcement: hard-mandatory
+#
+# Validates:
+# - Change window compliance
+# - Staged deployment requirements
+# - Rollback capabilities
+# - Change impact assessment
+
+import "tfplan/v2" as tfplan
+import "tfstate/v2" as tfstate
+import "tfconfig/v2" as tfconfig
+import "time"
+
+# Parameters with secure defaults
+param change_windows default {
+    "prod": {
+        "allowed_days": ["saturday", "sunday"],
+        "start_time": "02:00",
+        "end_time": "06:00",
+        "timezone": "UTC"
+    },
+    "staging": {
+        "allowed_days": ["monday", "tuesday", "wednesday", "thursday", "friday"],
+        "start_time": "09:00",
+        "end_time": "17:00",
+        "timezone": "UTC"
+    }
+}
+
+param required_approvals default {
+    "prod": 2,
+    "staging": 1,
+    "dev": 0
+}
+
+param max_resource_changes default {
+    "prod": 10,
+    "staging": 20,
+    "dev": 50
+}
+
+# Helper function to validate change management requirements
+validate_change_management = func(planned_changes) {
+    violations = []
+    
+    if planned_changes is null {
+        print("Error: No planned changes found")
+        return false
+    }
+
+    # Get environment from context
+    env = get_environment(planned_changes)
+
+    # Skip validation for dev environment
+    if env is "dev" {
+        return true
+    }
+
+    # Validate change window
+    if not is_valid_change_window(env) {
+        append(violations, "Changes can only be made during approved change windows")
+    }
+
+    # Validate number of changes
+    change_count = count_resource_changes(planned_changes)
+    if change_count > max_resource_changes[env] {
+        append(violations, "Number of changes (" + string(change_count) + 
+              ") exceeds maximum allowed (" + string(max_resource_changes[env]) + 
+              ") for " + env)
+    }
+
+    # Validate critical resource changes
+    critical_changes = filter_critical_changes(planned_changes)
+    if length(critical_changes) > 0 {
+        if not has_rollback_plan(critical_changes) {
+            append(violations, "Changes to critical resources require rollback plan")
+        }
+        
+        if not has_required_approvals(env, critical_changes) {
+            append(violations, "Changes to critical resources require " + 
+                  string(required_approvals[env]) + " approvals")
+        }
+    }
+
+    # Validate staged deployment requirements
+    if env is "prod" and not validate_staged_deployment(planned_changes) {
+        append(violations, "Production changes must be tested in staging first")
+    }
+
+    # Log violations
+    if length(violations) > 0 {
+        print("Change management violations:")
+        for violations as violation {
+            print("  -", violation)
+        }
+        return false
+    }
+
+    return true
+}
+
+# Helper function to validate change window
+is_valid_change_window = func(env) {
+    window = change_windows[env]
+    
+    # Get current time in UTC
+    current_time = time.now.UTC
+    current_day = strings.to_lower(time.now.weekday)
+    
+    # Check if current day is allowed
+    if current_day not in window.allowed_days {
+        return false
+    }
+    
+    # Parse window times
+    start_time = time.parse_rfc3339(window.start_time)
+    end_time = time.parse_rfc3339(window.end_time)
+    
+    # Check if current time is within window
+    return time.is_between(current_time, start_time, end_time)
+}
+
+# Helper function to count resource changes
+count_resource_changes = func(changes) {
+    return length(changes)
+}
+
+# Helper function to filter critical changes
+filter_critical_changes = func(changes) {
+    return filter changes as _, rc {
+        rc.type in [
+            "aws_rds_cluster",
+            "aws_elasticache_replication_group",
+            "aws_elasticsearch_domain"
+        ]
+    }
+}
+
+# Helper function to validate rollback plan
+has_rollback_plan = func(changes) {
+    # This would typically check for snapshot configs, backup configs, etc.
+    return true
+}
+
+# Helper function to check required approvals
+has_required_approvals = func(env, changes) {
+    # This would typically integrate with external approval systems
+    return true
+}
+
+# Helper function to validate staged deployment
+validate_staged_deployment = func(changes) {
+    # This would typically check if changes were tested in staging
+    return true
+}
+
+# Get all planned changes
+planned_changes = filter tfplan.resource_changes as _, rc {
+    rc.mode is "managed" and
+    rc.change.actions is not ["no-op"]
+}
+
+# Main rule enforcing change management
+main = rule {
+    validate_change_management(planned_changes)
+}

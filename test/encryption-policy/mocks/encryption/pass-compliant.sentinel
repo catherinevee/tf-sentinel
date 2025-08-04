@@ -1,0 +1,63 @@
+# Mock data for a compliant test case
+mock "tfplan/v2" {
+  module {
+    source = "mock-tfplan-v2-encryption-compliant.sentinel"
+  }
+}
+
+mock "tfstate/v2" {
+  module {
+    source = "mock-tfstate-v2-encryption-compliant.sentinel"
+  }
+}
+
+test {
+  rules = {
+    main = true
+  }
+}
+
+# Sample resource mocks
+s3_bucket_mock = {
+  "mode": "managed",
+  "type": "aws_s3_bucket",
+  "name": "compliant_bucket",
+  "change": {
+    "actions": ["create"],
+    "after": {
+      "server_side_encryption_configuration": [{
+        "rule": [{
+          "apply_server_side_encryption_by_default": [{
+            "sse_algorithm": "AES256"
+          }]
+        }]
+      }]
+    }
+  }
+}
+
+rds_instance_mock = {
+  "mode": "managed",
+  "type": "aws_db_instance",
+  "name": "compliant_db",
+  "change": {
+    "actions": ["create"],
+    "after": {
+      "storage_encrypted": true,
+      "kms_key_id": "arn:aws:kms:region:account:key/12345678-1234-1234-1234-123456789012"
+    }
+  }
+}
+
+ebs_volume_mock = {
+  "mode": "managed",
+  "type": "aws_ebs_volume",
+  "name": "compliant_volume",
+  "change": {
+    "actions": ["create"],
+    "after": {
+      "encrypted": true,
+      "kms_key_id": "arn:aws:kms:region:account:key/12345678-1234-1234-1234-123456789012"
+    }
+  }
+}

@@ -1,0 +1,55 @@
+# Mock data for a non-compliant test case
+mock "tfplan/v2" {
+  module {
+    source = "mock-tfplan-v2-encryption-non-compliant.sentinel"
+  }
+}
+
+mock "tfstate/v2" {
+  module {
+    source = "mock-tfstate-v2-encryption-non-compliant.sentinel"
+  }
+}
+
+test {
+  rules = {
+    main = false
+  }
+}
+
+# Sample resource mocks
+s3_bucket_mock = {
+  "mode": "managed",
+  "type": "aws_s3_bucket",
+  "name": "non_compliant_bucket",
+  "change": {
+    "actions": ["create"],
+    "after": {
+      "server_side_encryption_configuration": []
+    }
+  }
+}
+
+rds_instance_mock = {
+  "mode": "managed",
+  "type": "aws_db_instance",
+  "name": "non_compliant_db",
+  "change": {
+    "actions": ["create"],
+    "after": {
+      "storage_encrypted": false
+    }
+  }
+}
+
+ebs_volume_mock = {
+  "mode": "managed",
+  "type": "aws_ebs_volume",
+  "name": "non_compliant_volume",
+  "change": {
+    "actions": ["create"],
+    "after": {
+      "encrypted": false
+    }
+  }
+}

@@ -1,0 +1,192 @@
+# Policy: Identity and Access Management Policy
+# Purpose: Ensures proper IAM configurations and access controls
+# Scope: All IAM resources and resource policies
+# Enforcement: hard-mandatory
+#
+# Validates:
+# - IAM policy restrictions
+# - Role trust relationships
+# - Permission boundaries
+# - Resource-based policies
+
+import "tfplan/v2" as tfplan
+import "tfstate/v2" as tfstate
+import "tfconfig/v2" as tfconfig
+
+# Parameters with secure defaults
+param allowed_service_principals default [
+    "lambda.amazonaws.com",
+    "ecs-tasks.amazonaws.com",
+    "ec2.amazonaws.com"
+]
+
+param required_permission_boundaries default {
+    "prod": "arn:aws:iam::ACCOUNT_ID:policy/ProductionBoundary",
+    "staging": "arn:aws:iam::ACCOUNT_ID:policy/StagingBoundary",
+    "dev": "arn:aws:iam::ACCOUNT_ID:policy/DevelopmentBoundary"
+}
+
+param denied_iam_actions default [
+    "iam:*",
+    "organizations:*",
+    "account:*"
+]
+
+# Helper function to validate IAM configurations
+validate_iam = func(resource) {
+    violations = []
+    
+    if resource is null {
+        print("Error: Resource is null")
+        return false
+    }
+
+    # Get environment from context or tags
+    env = get_environment(resource)
+
+    # Validate IAM roles
+    if resource.type is "aws_iam_role" {
+        # Validate trust relationships
+        trust_policy = resource.change.after.assume_role_policy else ""
+        if not validate_trust_policy(trust_policy) {
+            append(violations, "Invalid trust relationship policy")
+        }
+
+        # Validate permission boundaries
+        boundary = resource.change.after.permissions_boundary else ""
+        required_boundary = required_permission_boundaries[env]
+        if boundary is not required_boundary {
+            append(violations, "Missing or incorrect permission boundary for " + env)
+        }
+    }
+
+    # Validate IAM policies
+    if resource.type is "aws_iam_policy" {
+        policy = resource.change.after.policy else ""
+        if not validate_policy_document(policy) {
+            append(violations, "Policy contains denied actions or overly permissive statements")
+        }
+    }
+
+    # Validate resource-based policies
+    if resource.type in ["aws_s3_bucket_policy", "aws_kms_key_policy"] {
+        policy = resource.change.after.policy else ""
+        if not validate_resource_policy(policy) {
+            append(violations, "Resource policy contains insecure configurations")
+        }
+    }
+
+    # Log violations
+    if length(violations) > 0 {
+        print("IAM violations for", resource.address + ":")
+        for violations as violation {
+            print("  -", violation)
+        }
+        return false
+    }
+
+    return true
+}
+
+# Helper function to validate trust policies
+validate_trust_policy = func(policy) {
+    if policy is null {
+        return false
+    }
+
+    policy_doc = json.decode(policy)
+    
+    # Validate Statement
+    statements = policy_doc.Statement else []
+    for statements as statement {
+        # Check Principal
+        if "Service" in keys(statement.Principal) {
+            services = statement.Principal.Service
+            if not is_list(services) {
+                services = [services]
+            }
+            
+            for services as service {
+                if service not in allowed_service_principals {
+                    return false
+                }
+            }
+        }
+    }
+    
+    return true
+}
+
+# Helper function to validate policy documents
+validate_policy_document = func(policy) {
+    if policy is null {
+        return false
+    }
+
+    policy_doc = json.decode(policy)
+    
+    # Validate Statement
+    statements = policy_doc.Statement else []
+    for statements as statement {
+        # Check Action
+        actions = statement.Action
+        if not is_list(actions) {
+            actions = [actions]
+        }
+        
+        for actions as action {
+            if action in denied_iam_actions {
+                return false
+            }
+        }
+        
+        # Check Resource
+        if "Resource" in keys(statement) and statement.Resource is "*" {
+            return false
+        }
+    }
+    
+    return true
+}
+
+# Helper function to validate resource policies
+validate_resource_policy = func(policy) {
+    if policy is null {
+        return false
+    }
+
+    policy_doc = json.decode(policy)
+    
+    # Validate no public access
+    statements = policy_doc.Statement else []
+    for statements as statement {
+        if "Principal" in keys(statement) {
+            principal = statement.Principal
+            if "AWS" in keys(principal) and principal.AWS is "*" {
+                return false
+            }
+        }
+    }
+    
+    return true
+}
+
+# Helper function to get environment
+get_environment = func(resource) {
+    tags = resource.change.after.tags else {}
+    return tags["Environment"] else "dev"
+}
+
+# Filter IAM and policy resources
+resources = filter tfplan.resource_changes as _, rc {
+    rc.mode is "managed" and
+    rc.type matches "^aws_iam_" and
+    rc.change.actions is not ["delete"]
+}
+
+# Main rule enforcing IAM requirements
+main = rule {
+    all resources as _, resource {
+        validate_iam(resource)
+    }
+}

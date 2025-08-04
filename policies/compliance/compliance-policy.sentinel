@@ -1,0 +1,144 @@
+# Policy: Compliance
+# Purpose: Enforces organizational compliance requirements
+# Scope: All resources
+# Enforcement: hard-mandatory
+#
+# Validates:
+# - Required resource tagging
+# - Backup policies
+# - Logging configuration
+# - IAM policies
+
+import "tfplan/v2" as tfplan
+import "tfstate/v2" as tfstate
+import "tfconfig/v2" as tfconfig
+
+# Required tags for all resources
+param mandatory_tags default [
+    "Environment",
+    "Owner",
+    "CostCenter",
+    "Project"
+]
+
+# Helper function to validate required tags
+validate_tags = func(resource) {
+    violations = []
+    
+    # Input validation
+    if resource is null {
+        print("Error: Resource is null")
+        return false
+    }
+
+    # Get resource tags
+    tags = resource.change.after.tags else {}
+
+    # Validate required tags
+    for mandatory_tags as tag {
+        if tag not in keys(tags) {
+            append(violations, "Missing required tag: " + tag)
+        } else if length(tags[tag]) == 0 {
+            append(violations, "Empty value for tag: " + tag)
+        }
+    }
+
+    # Log violations
+    if length(violations) > 0 {
+        print("Tag violations for", resource.address + ":")
+        for violations as violation {
+            print("  -", violation)
+        }
+        return false
+    }
+
+    return true
+}
+
+# Helper function to validate backup configurations
+validate_backup = func(resource) {
+    violations = []
+    
+    # Input validation
+    if resource is null {
+        print("Error: Resource is null")
+        return false
+    }
+
+    # RDS backup retention
+    if resource.type is "aws_db_instance" {
+        backup_retention_period = resource.change.after.backup_retention_period else 0
+        if backup_retention_period < 7 {
+            append(violations, "RDS backup retention period must be at least 7 days")
+        }
+    }
+
+    # DynamoDB backup
+    if resource.type is "aws_dynamodb_table" {
+        point_in_time_recovery = resource.change.after.point_in_time_recovery else null
+        if point_in_time_recovery is null or not point_in_time_recovery {
+            append(violations, "DynamoDB point-in-time recovery must be enabled")
+        }
+    }
+
+    # Log violations
+    if length(violations) > 0 {
+        print("Backup configuration violations for", resource.address + ":")
+        for violations as violation {
+            print("  -", violation)
+        }
+        return false
+    }
+
+    return true
+}
+
+# Helper function to validate IAM policies
+validate_iam_policies = func(resource) {
+    violations = []
+
+    # Input validation
+    if resource is null {
+        print("Error: Resource is null")
+        return false
+    }
+
+    # Check for overly permissive IAM policies
+    if resource.type is "aws_iam_policy" {
+        policy = resource.change.after.policy else ""
+        
+        # Check for "*" in policy actions or resources
+        if policy matches ".*\"Action\"\\s*:\\s*\"\\*\".*" {
+            append(violations, "IAM policy contains overly permissive Action '*'")
+        }
+        if policy matches ".*\"Resource\"\\s*:\\s*\"\\*\".*" {
+            append(violations, "IAM policy contains overly permissive Resource '*'")
+        }
+    }
+
+    # Log violations
+    if length(violations) > 0 {
+        print("IAM policy violations for", resource.address + ":")
+        for violations as violation {
+            print("  -", violation)
+        }
+        return false
+    }
+
+    return true
+}
+
+# Filter resources that require validation
+resources_to_validate = filter tfplan.resource_changes as _, rc {
+    rc.mode is "managed" and
+    rc.change.actions is not ["delete"]
+}
+
+# Main rule combining all compliance checks
+main = rule {
+    all resources_to_validate as _, resource {
+        validate_tags(resource) and
+        validate_backup(resource) and
+        validate_iam_policies(resource)
+    }
+}

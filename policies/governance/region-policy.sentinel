@@ -1,0 +1,120 @@
+# Policy: Region Restriction Policy
+# Purpose: Enforces resource deployment in approved regions
+# Scope: All resources
+# Enforcement: hard-mandatory
+#
+# Validates:
+# - Allowed regions
+# - Region-specific requirements
+# - Cross-region configurations
+# - Regional compliance requirements
+
+import "tfplan/v2" as tfplan
+import "tfstate/v2" as tfstate
+import "tfconfig/v2" as tfconfig
+
+# Parameters with secure defaults
+param allowed_regions default {
+    "prod": ["us-east-1", "us-west-2", "eu-west-1"],
+    "staging": ["us-east-1", "us-west-2"],
+    "dev": ["us-east-1"]
+}
+
+param region_requirements default {
+    "us-east-1": {
+        "required_zones": ["us-east-1a", "us-east-1b", "us-east-1c"],
+        "min_az_count": 3
+    },
+    "us-west-2": {
+        "required_zones": ["us-west-2a", "us-west-2b"],
+        "min_az_count": 2
+    }
+}
+
+# Helper function to validate region configuration
+validate_region = func(resource) {
+    violations = []
+    
+    if resource is null {
+        print("Error: Resource is null")
+        return false
+    }
+
+    # Get resource region
+    region = get_resource_region(resource)
+    if region is null {
+        print("Warning: Could not determine region for resource:", resource.address)
+        return true
+    }
+
+    # Get environment from tags
+    tags = resource.change.after.tags else {}
+    env = tags["Environment"] else "dev"
+
+    # Validate region is allowed for environment
+    if region not in allowed_regions[env] {
+        append(violations, "Region " + region + " is not allowed for environment " + env)
+    }
+
+    # Validate region-specific requirements
+    if region in keys(region_requirements) {
+        requirements = region_requirements[region]
+
+        # Validate AZ configuration for applicable resources
+        if resource.type in ["aws_vpc", "aws_subnet", "aws_autoscaling_group"] {
+            availability_zones = get_resource_azs(resource)
+            if length(availability_zones) < requirements.min_az_count {
+                append(violations, "Resource must use at least " + 
+                      string(requirements.min_az_count) + " availability zones in " + region)
+            }
+        }
+    }
+
+    # Log violations
+    if length(violations) > 0 {
+        print("Region policy violations for", resource.address + ":")
+        for violations as violation {
+            print("  -", violation)
+        }
+        return false
+    }
+
+    return true
+}
+
+# Helper function to get resource region
+get_resource_region = func(resource) {
+    if "provider_config" in keys(resource) {
+        if "region" in keys(resource.provider_config) {
+            return resource.provider_config.region
+        }
+    }
+    return null
+}
+
+# Helper function to get resource AZs
+get_resource_azs = func(resource) {
+    if resource.type is "aws_vpc" {
+        return resource.change.after.availability_zones else []
+    }
+    if resource.type is "aws_subnet" {
+        return [resource.change.after.availability_zone] else []
+    }
+    if resource.type is "aws_autoscaling_group" {
+        return resource.change.after.vpc_zone_identifier else []
+    }
+    return []
+}
+
+# Filter all managed resources
+resources = filter tfplan.resource_changes as _, rc {
+    rc.mode is "managed" and
+    rc.change.actions is not ["delete"]
+}
+
+# Main rule enforcing region restrictions
+main = rule {
+    all resources as _, resource {
+        validate_region(resource)
+    }
+}

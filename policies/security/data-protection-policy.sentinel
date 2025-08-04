@@ -1,0 +1,92 @@
+# Policy: Data Protection Policy
+# Purpose: Ensures data protection and privacy requirements are met
+# Scope: All data storage and processing resources
+# Enforcement: hard-mandatory
+#
+# Validates:
+# - Data classification tags
+# - Cross-region data transfer controls
+# - Data retention policies
+# - Privacy requirements
+
+import "tfplan/v2" as tfplan
+import "tfstate/v2" as tfstate
+import "tfconfig/v2" as tfconfig
+
+# Parameters with secure defaults
+param required_data_classifications default [
+    "public",
+    "internal",
+    "confidential",
+    "restricted"
+]
+
+param min_retention_days default {
+    "public": 30,
+    "internal": 90,
+    "confidential": 365,
+    "restricted": 730
+}
+
+# Helper function to validate data classification
+validate_data_classification = func(resource) {
+    violations = []
+    
+    if resource is null {
+        print("Error: Resource is null")
+        return false
+    }
+
+    # Get resource tags
+    tags = resource.change.after.tags else {}
+    
+    # Check for data classification tag
+    if "DataClassification" not in keys(tags) {
+        append(violations, "Missing DataClassification tag")
+    } else {
+        classification = tags["DataClassification"]
+        if classification not in required_data_classifications {
+            append(violations, "Invalid DataClassification value: " + classification)
+        }
+    }
+
+    # Validate retention period based on classification
+    if resource.type in ["aws_s3_bucket", "aws_dynamodb_table"] {
+        if "RetentionPeriod" not in keys(tags) {
+            append(violations, "Missing RetentionPeriod tag")
+        } else {
+            retention_days = int(tags["RetentionPeriod"])
+            min_days = min_retention_days[tags["DataClassification"]]
+            if retention_days < min_days {
+                append(violations, "Retention period " + string(retention_days) + 
+                      " days is less than required " + string(min_days) + 
+                      " days for " + tags["DataClassification"] + " data")
+            }
+        }
+    }
+
+    # Log violations
+    if length(violations) > 0 {
+        print("Data protection violations for", resource.address + ":")
+        for violations as violation {
+            print("  -", violation)
+        }
+        return false
+    }
+
+    return true
+}
+
+# Filter data storage resources
+data_resources = filter tfplan.resource_changes as _, rc {
+    rc.mode is "managed" and
+    rc.type in ["aws_s3_bucket", "aws_dynamodb_table", "aws_rds_cluster", "aws_redshift_cluster"] and
+    rc.change.actions is not ["delete"]
+}
+
+# Main rule enforcing data protection
+main = rule {
+    all data_resources as _, resource {
+        validate_data_classification(resource)
+    }
+}

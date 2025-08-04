@@ -1,0 +1,96 @@
+# Policy: Disaster Recovery Policy
+# Purpose: Ensures disaster recovery requirements are met
+# Scope: Critical infrastructure resources
+# Enforcement: hard-mandatory
+#
+# Validates:
+# - Cross-region replication
+# - Backup configurations
+# - Recovery point objectives (RPO)
+# - Recovery time objectives (RTO)
+
+import "tfplan/v2" as tfplan
+import "tfstate/v2" as tfstate
+import "tfconfig/v2" as tfconfig
+
+# Parameters with secure defaults
+param required_regions default ["us-east-1", "us-west-2"]
+param rpo_requirements default {
+    "critical": 1,      # 1 hour
+    "important": 24,    # 24 hours
+    "standard": 168     # 1 week
+}
+
+# Helper function to validate DR configurations
+validate_dr_config = func(resource) {
+    violations = []
+    
+    if resource is null {
+        print("Error: Resource is null")
+        return false
+    }
+
+    # Get resource tags
+    tags = resource.change.after.tags else {}
+    
+    # Validate business criticality classification
+    if "BusinessCriticality" not in keys(tags) {
+        append(violations, "Missing BusinessCriticality tag")
+    }
+
+    # Validate DR requirements based on resource type
+    if resource.type is "aws_s3_bucket" {
+        # Check cross-region replication for critical buckets
+        if tags["BusinessCriticality"] is "critical" {
+            replication_config = resource.change.after.replication_configuration else null
+            if replication_config is null {
+                append(violations, "Critical S3 bucket requires cross-region replication")
+            }
+        }
+    }
+
+    if resource.type is "aws_rds_cluster" {
+        # Check multi-AZ deployment
+        multi_az = resource.change.after.multi_az else false
+        if tags["BusinessCriticality"] in ["critical", "important"] and not multi_az {
+            append(violations, "Critical/Important RDS clusters must be Multi-AZ")
+        }
+
+        # Check backup retention
+        backup_retention = resource.change.after.backup_retention_period else 0
+        required_retention = get_required_retention(tags["BusinessCriticality"])
+        if backup_retention < required_retention {
+            append(violations, "Backup retention period does not meet RPO requirements")
+        }
+    }
+
+    # Log violations
+    if length(violations) > 0 {
+        print("DR configuration violations for", resource.address + ":")
+        for violations as violation {
+            print("  -", violation)
+        }
+        return false
+    }
+
+    return true
+}
+
+# Helper function to get required retention based on criticality
+get_required_retention = func(criticality) {
+    return rpo_requirements[criticality] else rpo_requirements["standard"]
+}
+
+# Filter resources that need DR validation
+dr_resources = filter tfplan.resource_changes as _, rc {
+    rc.mode is "managed" and
+    rc.type in ["aws_s3_bucket", "aws_rds_cluster", "aws_dynamodb_table"] and
+    rc.change.actions is not ["delete"]
+}
+
+# Main rule enforcing DR requirements
+main = rule {
+    all dr_resources as _, resource {
+        validate_dr_config(resource)
+    }
+}
