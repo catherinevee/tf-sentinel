@@ -1,0 +1,72 @@
+mock "tfplan/v2" {
+    // Mock for secure CloudTrail configuration
+    mock_tfplan_secure_cloudtrail = {
+        "planned_values": {
+            "root_module": {
+                "resources": [
+                    {
+                        "address": "aws_cloudtrail.secure_trail",
+                        "mode": "managed",
+                        "type": "aws_cloudtrail",
+                        "values": {
+                            "name": "secure-cloudtrail",
+                            "s3_bucket_name": "secure-audit-logs",
+                            "include_global_service_events": true,
+                            "is_multi_region_trail": true,
+                            "enable_logging": true,
+                            "kms_key_id": "arn:aws:kms:us-west-2:123456789012:key/secure-key",
+                            "enable_log_file_validation": true,
+                            "cloud_watch_logs_group_arn": "arn:aws:logs:us-west-2:123456789012:log-group:CloudTrail/audit-logs:*",
+                            "cloud_watch_logs_role_arn": "arn:aws:iam::123456789012:role/CloudTrailToCloudWatchLogs",
+                            "event_selector": [
+                                {
+                                    "read_write_type": "All",
+                                    "include_management_events": true,
+                                    "data_resource": [
+                                        {
+                                            "type": "AWS::S3::Object",
+                                            "values": ["arn:aws:s3:::"]
+                                        }
+                                    ]
+                                }
+                            ],
+                            "tags": {
+                                "Environment": "prod",
+                                "SecurityLevel": "high"
+                            }
+                        }
+                    }
+                ]
+            }
+        }
+    }
+
+    // Mock for insecure CloudTrail configuration
+    mock_tfplan_insecure_cloudtrail = {
+        "planned_values": {
+            "root_module": {
+                "resources": [
+                    {
+                        "address": "aws_cloudtrail.insecure_trail",
+                        "mode": "managed",
+                        "type": "aws_cloudtrail",
+                        "values": {
+                            "name": "insecure-cloudtrail",
+                            "s3_bucket_name": "audit-logs",
+                            "include_global_service_events": false,
+                            "is_multi_region_trail": false,
+                            "enable_logging": true,
+                            "enable_log_file_validation": false,
+                            "event_selector": [
+                                {
+                                    "read_write_type": "WriteOnly",
+                                    "include_management_events": false
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        }
+    }
+}

@@ -1,0 +1,72 @@
+mock "tfplan/v2" {
+    // Mock for secure VPN configuration
+    mock_tfplan_secure_vpn = {
+        "planned_values": {
+            "root_module": {
+                "resources": [
+                    {
+                        "address": "aws_vpn_connection.secure_vpn",
+                        "mode": "managed",
+                        "type": "aws_vpn_connection",
+                        "values": {
+                            "customer_gateway_id": "cgw-12345",
+                            "transit_gateway_id": "tgw-12345",
+                            "type": "ipsec.1",
+                            "static_routes_only": false,
+                            "tunnel1_inside_cidr": "169.254.1.0/30",
+                            "tunnel2_inside_cidr": "169.254.2.0/30",
+                            "tunnel1_preshared_key": "REDACTED",
+                            "tunnel2_preshared_key": "REDACTED",
+                            "tunnel1_dpd_timeout_seconds": 30,
+                            "tunnel2_dpd_timeout_seconds": 30,
+                            "tunnel1_ike_versions": ["ikev2"],
+                            "tunnel2_ike_versions": ["ikev2"],
+                            "tags": {
+                                "Name": "secure-vpn",
+                                "Environment": "prod"
+                            }
+                        }
+                    },
+                    {
+                        "address": "aws_customer_gateway.secure_cgw",
+                        "mode": "managed",
+                        "type": "aws_customer_gateway",
+                        "values": {
+                            "bgp_asn": 65000,
+                            "ip_address": "203.0.113.1",
+                            "type": "ipsec.1",
+                            "tags": {
+                                "Name": "secure-customer-gateway"
+                            }
+                        }
+                    }
+                ]
+            }
+        }
+    }
+
+    // Mock for insecure VPN configuration
+    mock_tfplan_insecure_vpn = {
+        "planned_values": {
+            "root_module": {
+                "resources": [
+                    {
+                        "address": "aws_vpn_connection.insecure_vpn",
+                        "mode": "managed",
+                        "type": "aws_vpn_connection",
+                        "values": {
+                            "customer_gateway_id": "cgw-67890",
+                            "vpn_gateway_id": "vgw-67890",
+                            "type": "ipsec.1",
+                            "static_routes_only": true,
+                            "tunnel1_inside_cidr": "169.254.100.0/30",
+                            "tunnel2_inside_cidr": "169.254.101.0/30",
+                            "tunnel1_ike_versions": ["ikev1"],
+                            "tunnel2_ike_versions": ["ikev1"]
+                        }
+                    }
+                ]
+            }
+        }
+    }
+}

@@ -1,0 +1,118 @@
+mock "tfplan/v2" {
+    planned_values = {
+        "aws_s3_bucket.compliant_bucket": {
+            "server_side_encryption_configuration": {
+                "rule": {
+                    "apply_server_side_encryption_by_default": {
+                        "sse_algorithm": "aws:kms",
+                        "kms_master_key_id": "arn:aws:kms:us-east-1:123456789012:key/abcd1234-a123-456a-a12b-a123b4cd56ef"
+                    }
+                }
+            }
+        },
+        "aws_db_instance.compliant_db": {
+            "storage_encrypted": true,
+            "kms_key_id": "arn:aws:kms:us-east-1:123456789012:key/abcd1234-a123-456a-a12b-a123b4cd56ef"
+        }
+    }
+}
+
+mock_tfplan_s3_encrypted = {
+    "planned_values": {
+        "aws_s3_bucket.test_bucket": {
+            "server_side_encryption_configuration": {
+                "rule": {
+                    "apply_server_side_encryption_by_default": {
+                        "sse_algorithm": "aws:kms"
+                    }
+                }
+            }
+        }
+    }
+}
+
+mock_tfplan_s3_unencrypted = {
+    "planned_values": {
+        "aws_s3_bucket.test_bucket": {
+            "server_side_encryption_configuration": {}
+        }
+    }
+}
+
+mock_tfplan_secure_vpc = {
+    "planned_values": {
+        "aws_vpc.test_vpc": {
+            "enable_dns_hostnames": true,
+            "enable_dns_support": true,
+            "tags": {
+                "Environment": "prod",
+                "Owner": "platform-team"
+            }
+        },
+        "aws_security_group.test_sg": {
+            "ingress": [
+                {
+                    "from_port": 443,
+                    "to_port": 443,
+                    "protocol": "tcp",
+                    "cidr_blocks": ["10.0.0.0/8"]
+                }
+            ]
+        }
+    }
+}
+
+mock_tfplan_insecure_vpc = {
+    "planned_values": {
+        "aws_vpc.test_vpc": {
+            "enable_dns_hostnames": false,
+            "enable_dns_support": false
+        },
+        "aws_security_group.test_sg": {
+            "ingress": [
+                {
+                    "from_port": 0,
+                    "to_port": 65535,
+                    "protocol": "-1",
+                    "cidr_blocks": ["0.0.0.0/0"]
+                }
+            ]
+        }
+    }
+}
+
+mock_tfplan_compliant_iam = {
+    "planned_values": {
+        "aws_iam_role.test_role": {
+            "permissions_boundary": "arn:aws:iam::123456789012:policy/ProductionBoundary",
+            "assume_role_policy": {
+                "Statement": [
+                    {
+                        "Effect": "Allow",
+                        "Principal": {
+                            "Service": "ec2.amazonaws.com"
+                        },
+                        "Action": "sts:AssumeRole"
+                    }
+                ]
+            }
+        }
+    }
+}
+
+mock_tfplan_overprivileged_iam = {
+    "planned_values": {
+        "aws_iam_role.test_role": {
+            "permissions_boundary": "",
+            "assume_role_policy": {
+                "Statement": [
+                    {
+                        "Effect": "Allow",
+                        "Principal": "*",
+                        "Action": "*"
+                    }
+                ]
+            }
+        }
+    }
+}

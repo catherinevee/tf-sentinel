@@ -1,0 +1,76 @@
+import "tfplan/v2" as tfplan
+
+mock "tfplan/v2" {
+  module {
+    source = "./mocks/security-mock.sentinel"
+  }
+}
+
+test "verify_encryption_enabled" {
+    rules = {
+        main = verify_encryption_enabled
+    }
+
+    cases = [
+        {
+            name = "s3_bucket_encrypted",
+            want = true,
+            mock = {
+                tfplan = mock_tfplan_s3_encrypted
+            }
+        },
+        {
+            name = "s3_bucket_unencrypted",
+            want = false,
+            mock = {
+                tfplan = mock_tfplan_s3_unencrypted
+            }
+        }
+    ]
+}
+
+test "verify_network_security" {
+    rules = {
+        main = verify_network_security
+    }
+
+    cases = [
+        {
+            name = "secure_vpc_config",
+            want = true,
+            mock = {
+                tfplan = mock_tfplan_secure_vpc
+            }
+        },
+        {
+            name = "insecure_vpc_config",
+            want = false,
+            mock = {
+                tfplan = mock_tfplan_insecure_vpc
+            }
+        }
+    ]
+}
+
+test "verify_iam_permissions" {
+    rules = {
+        main = verify_iam_permissions
+    }
+
+    cases = [
+        {
+            name = "compliant_iam_role",
+            want = true,
+            mock = {
+                tfplan = mock_tfplan_compliant_iam
+            }
+        },
+        {
+            name = "overprivileged_iam_role",
+            want = false,
+            mock = {
+                tfplan = mock_tfplan_overprivileged_iam
+            }
+        }
+    ]
+}

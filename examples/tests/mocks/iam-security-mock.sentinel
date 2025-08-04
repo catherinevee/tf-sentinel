@@ -1,0 +1,120 @@
+mock "tfplan/v2" {
+    // Mock for compliant IAM role configuration
+    mock_tfplan_compliant_iam = {
+        "planned_values": {
+            "root_module": {
+                "resources": [
+                    {
+                        "address": "aws_iam_role.compliant_role",
+                        "mode": "managed",
+                        "type": "aws_iam_role",
+                        "values": {
+                            "name": "compliant-role",
+                            "assume_role_policy": {
+                                "Version": "2012-10-17",
+                                "Statement": [
+                                    {
+                                        "Effect": "Allow",
+                                        "Principal": {
+                                            "Service": "ec2.amazonaws.com"
+                                        },
+                                        "Action": "sts:AssumeRole",
+                                        "Condition": {
+                                            "Bool": {
+                                                "aws:MultiFactorAuthPresent": "true"
+                                            }
+                                        }
+                                    }
+                                ]
+                            },
+                            "permissions_boundary": "arn:aws:iam::aws:policy/PowerUserAccess",
+                            "max_session_duration": 3600,
+                            "tags": {
+                                "Environment": "prod"
+                            }
+                        }
+                    },
+                    {
+                        "address": "aws_iam_role_policy.compliant_policy",
+                        "mode": "managed",
+                        "type": "aws_iam_role_policy",
+                        "values": {
+                            "policy": {
+                                "Version": "2012-10-17",
+                                "Statement": [
+                                    {
+                                        "Effect": "Allow",
+                                        "Action": [
+                                            "s3:GetObject",
+                                            "s3:ListBucket"
+                                        ],
+                                        "Resource": [
+                                            "arn:aws:s3:::example-bucket",
+                                            "arn:aws:s3:::example-bucket/*"
+                                        ],
+                                        "Condition": {
+                                            "Bool": {
+                                                "aws:SecureTransport": "true"
+                                            }
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                ]
+            }
+        }
+    }
+
+    // Mock for overprivileged IAM role configuration
+    mock_tfplan_overprivileged_iam = {
+        "planned_values": {
+            "root_module": {
+                "resources": [
+                    {
+                        "address": "aws_iam_role.overprivileged_role",
+                        "mode": "managed",
+                        "type": "aws_iam_role",
+                        "values": {
+                            "name": "overprivileged-role",
+                            "assume_role_policy": {
+                                "Version": "2012-10-17",
+                                "Statement": [
+                                    {
+                                        "Effect": "Allow",
+                                        "Principal": {
+                                            "AWS": "*"
+                                        },
+                                        "Action": "sts:AssumeRole"
+                                    }
+                                ]
+                            },
+                            "max_session_duration": 43200,
+                            "tags": {
+                                "Environment": "dev"
+                            }
+                        }
+                    },
+                    {
+                        "address": "aws_iam_role_policy.overprivileged_policy",
+                        "mode": "managed",
+                        "type": "aws_iam_role_policy",
+                        "values": {
+                            "policy": {
+                                "Version": "2012-10-17",
+                                "Statement": [
+                                    {
+                                        "Effect": "Allow",
+                                        "Action": "*",
+                                        "Resource": "*"
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                ]
+            }
+        }
+    }
+}

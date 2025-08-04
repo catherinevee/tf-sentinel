@@ -1,0 +1,90 @@
+mock "tfplan/v2" {
+    // Mock for secure network ACL configuration
+    mock_tfplan_secure_nacl = {
+        "planned_values": {
+            "root_module": {
+                "resources": [
+                    {
+                        "address": "aws_network_acl.secure_nacl",
+                        "mode": "managed",
+                        "type": "aws_network_acl",
+                        "values": {
+                            "vpc_id": "vpc-12345",
+                            "subnet_ids": ["subnet-12345", "subnet-67890"],
+                            "ingress": [
+                                {
+                                    "protocol": "tcp",
+                                    "rule_no": 100,
+                                    "action": "allow",
+                                    "cidr_block": "10.0.0.0/8",
+                                    "from_port": 443,
+                                    "to_port": 443
+                                },
+                                {
+                                    "protocol": "tcp",
+                                    "rule_no": 110,
+                                    "action": "allow",
+                                    "cidr_block": "10.0.0.0/8",
+                                    "from_port": 80,
+                                    "to_port": 80
+                                }
+                            ],
+                            "egress": [
+                                {
+                                    "protocol": "tcp",
+                                    "rule_no": 100,
+                                    "action": "allow",
+                                    "cidr_block": "0.0.0.0/0",
+                                    "from_port": 443,
+                                    "to_port": 443
+                                }
+                            ],
+                            "tags": {
+                                "Name": "secure-nacl",
+                                "Environment": "prod"
+                            }
+                        }
+                    }
+                ]
+            }
+        }
+    }
+
+    // Mock for insecure network ACL configuration
+    mock_tfplan_insecure_nacl = {
+        "planned_values": {
+            "root_module": {
+                "resources": [
+                    {
+                        "address": "aws_network_acl.insecure_nacl",
+                        "mode": "managed",
+                        "type": "aws_network_acl",
+                        "values": {
+                            "vpc_id": "vpc-67890",
+                            "ingress": [
+                                {
+                                    "protocol": "-1",
+                                    "rule_no": 100,
+                                    "action": "allow",
+                                    "cidr_block": "0.0.0.0/0",
+                                    "from_port": 0,
+                                    "to_port": 0
+                                }
+                            ],
+                            "egress": [
+                                {
+                                    "protocol": "-1",
+                                    "rule_no": 100,
+                                    "action": "allow",
+                                    "cidr_block": "0.0.0.0/0",
+                                    "from_port": 0,
+                                    "to_port": 0
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        }
+    }
+}

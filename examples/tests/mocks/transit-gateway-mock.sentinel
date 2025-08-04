@@ -1,0 +1,81 @@
+mock "tfplan/v2" {
+    // Mock for secure transit gateway configuration
+    mock_tfplan_secure_tgw = {
+        "planned_values": {
+            "root_module": {
+                "resources": [
+                    {
+                        "address": "aws_ec2_transit_gateway.secure_tgw",
+                        "mode": "managed",
+                        "type": "aws_ec2_transit_gateway",
+                        "values": {
+                            "description": "Secure Transit Gateway",
+                            "amazon_side_asn": 64512,
+                            "auto_accept_shared_attachments": "disable",
+                            "default_route_table_association": "disable",
+                            "default_route_table_propagation": "disable",
+                            "dns_support": "enable",
+                            "vpn_ecmp_support": "enable",
+                            "tags": {
+                                "Name": "secure-tgw",
+                                "Environment": "prod"
+                            }
+                        }
+                    },
+                    {
+                        "address": "aws_ec2_transit_gateway_route_table.secure_rt",
+                        "mode": "managed",
+                        "type": "aws_ec2_transit_gateway_route_table",
+                        "values": {
+                            "transit_gateway_id": "tgw-12345",
+                            "tags": {
+                                "Name": "secure-tgw-rt"
+                            }
+                        }
+                    },
+                    {
+                        "address": "aws_ram_resource_share.tgw_share",
+                        "mode": "managed",
+                        "type": "aws_ram_resource_share",
+                        "values": {
+                            "name": "tgw-share",
+                            "allow_external_principals": false
+                        }
+                    }
+                ]
+            }
+        }
+    }
+
+    // Mock for insecure transit gateway configuration
+    mock_tfplan_insecure_tgw = {
+        "planned_values": {
+            "root_module": {
+                "resources": [
+                    {
+                        "address": "aws_ec2_transit_gateway.insecure_tgw",
+                        "mode": "managed",
+                        "type": "aws_ec2_transit_gateway",
+                        "values": {
+                            "description": "Insecure Transit Gateway",
+                            "auto_accept_shared_attachments": "enable",
+                            "default_route_table_association": "enable",
+                            "default_route_table_propagation": "enable",
+                            "dns_support": "disable",
+                            "vpn_ecmp_support": "disable"
+                        }
+                    },
+                    {
+                        "address": "aws_ram_resource_share.insecure_tgw_share",
+                        "mode": "managed",
+                        "type": "aws_ram_resource_share",
+                        "values": {
+                            "name": "insecure-tgw-share",
+                            "allow_external_principals": true
+                        }
+                    }
+                ]
+            }
+        }
+    }
+}

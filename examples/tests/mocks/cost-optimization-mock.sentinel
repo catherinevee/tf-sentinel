@@ -1,0 +1,109 @@
+mock "tfplan/v2" {
+    // Mock for cost-optimized resources
+    mock_tfplan_cost_optimized = {
+        "planned_values": {
+            "root_module": {
+                "resources": [
+                    {
+                        "address": "aws_instance.optimized_instance",
+                        "mode": "managed",
+                        "type": "aws_instance",
+                        "values": {
+                            "instance_type": "t3.micro",
+                            "ebs_optimized": true,
+                            "tags": {
+                                "Environment": "dev",
+                                "CostCenter": "development",
+                                "Project": "cost-optimization"
+                            }
+                        }
+                    },
+                    {
+                        "address": "aws_ebs_volume.optimized_volume",
+                        "mode": "managed",
+                        "type": "aws_ebs_volume",
+                        "values": {
+                            "size": 50,
+                            "type": "gp3",
+                            "encrypted": true,
+                            "tags": {
+                                "Environment": "dev",
+                                "CostCenter": "development"
+                            }
+                        }
+                    },
+                    {
+                        "address": "aws_s3_bucket.optimized_bucket",
+                        "mode": "managed",
+                        "type": "aws_s3_bucket",
+                        "values": {
+                            "bucket": "cost-optimized-bucket",
+                            "lifecycle_rule": [
+                                {
+                                    "enabled": true,
+                                    "transition": [
+                                        {
+                                            "days": 30,
+                                            "storage_class": "STANDARD_IA"
+                                        },
+                                        {
+                                            "days": 90,
+                                            "storage_class": "GLACIER"
+                                        }
+                                    ],
+                                    "expiration": {
+                                        "days": 365
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        }
+    }
+
+    // Mock for non-optimized resources
+    mock_tfplan_non_optimized = {
+        "planned_values": {
+            "root_module": {
+                "resources": [
+                    {
+                        "address": "aws_instance.expensive_instance",
+                        "mode": "managed",
+                        "type": "aws_instance",
+                        "values": {
+                            "instance_type": "m5.2xlarge",
+                            "ebs_optimized": false,
+                            "tags": {
+                                "Environment": "dev"
+                            }
+                        }
+                    },
+                    {
+                        "address": "aws_ebs_volume.expensive_volume",
+                        "mode": "managed",
+                        "type": "aws_ebs_volume",
+                        "values": {
+                            "size": 1000,
+                            "type": "io1",
+                            "iops": 5000,
+                            "encrypted": false
+                        }
+                    },
+                    {
+                        "address": "aws_s3_bucket.expensive_bucket",
+                        "mode": "managed",
+                        "type": "aws_s3_bucket",
+                        "values": {
+                            "bucket": "non-optimized-bucket",
+                            "versioning": {
+                                "enabled": true
+                            }
+                        }
+                    }
+                ]
+            }
+        }
+    }
+}

@@ -1,0 +1,75 @@
+mock "tfplan/v2" {
+    // Mock for compliant budget configuration
+    mock_tfplan_compliant_budget = {
+        "planned_values": {
+            "root_module": {
+                "resources": [
+                    {
+                        "address": "aws_budgets_budget.compliant_budget",
+                        "mode": "managed",
+                        "type": "aws_budgets_budget",
+                        "values": {
+                            "name": "compliant-budget",
+                            "budget_type": "COST",
+                            "limit_amount": "1000",
+                            "time_unit": "MONTHLY",
+                            "cost_filters": {
+                                "Service": ["Amazon Elastic Compute Cloud - Compute", "Amazon Simple Storage Service"],
+                                "TagKeyValue": ["Environment$Production"]
+                            },
+                            "notification": [
+                                {
+                                    "comparison_operator": "GREATER_THAN",
+                                    "threshold": 80,
+                                    "threshold_type": "PERCENTAGE",
+                                    "notification_type": "ACTUAL"
+                                },
+                                {
+                                    "comparison_operator": "GREATER_THAN",
+                                    "threshold": 100,
+                                    "threshold_type": "PERCENTAGE",
+                                    "notification_type": "FORECASTED"
+                                }
+                            ],
+                            "tags": {
+                                "Environment": "prod"
+                            }
+                        }
+                    }
+                ]
+            }
+        }
+    }
+
+    // Mock for non-compliant budget configuration
+    mock_tfplan_non_compliant_budget = {
+        "planned_values": {
+            "root_module": {
+                "resources": [
+                    {
+                        "address": "aws_budgets_budget.non_compliant_budget",
+                        "mode": "managed",
+                        "type": "aws_budgets_budget",
+                        "values": {
+                            "name": "non-compliant-budget",
+                            "budget_type": "COST",
+                            "limit_amount": "50000",
+                            "time_unit": "MONTHLY",
+                            "notification": [
+                                {
+                                    "comparison_operator": "GREATER_THAN",
+                                    "threshold": 90,
+                                    "threshold_type": "PERCENTAGE",
+                                    "notification_type": "ACTUAL"
+                                }
+                            ],
+                            "tags": {
+                                "Environment": "prod"
+                            }
+                        }
+                    }
+                ]
+            }
+        }
+    }
+}

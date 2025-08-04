@@ -1,0 +1,89 @@
+mock "tfplan/v2" {
+    // Mock for secure Config configuration
+    mock_tfplan_secure_config = {
+        "planned_values": {
+            "root_module": {
+                "resources": [
+                    {
+                        "address": "aws_config_configuration_recorder.secure_recorder",
+                        "mode": "managed",
+                        "type": "aws_config_configuration_recorder",
+                        "values": {
+                            "name": "secure-config-recorder",
+                            "recording_group": {
+                                "all_supported": true,
+                                "include_global_resources": true
+                            },
+                            "role_arn": "arn:aws:iam::123456789012:role/aws-service-role/config.amazonaws.com/AWSServiceRoleForConfig"
+                        }
+                    },
+                    {
+                        "address": "aws_config_configuration_recorder_status.secure_recorder_status",
+                        "mode": "managed",
+                        "type": "aws_config_configuration_recorder_status",
+                        "values": {
+                            "is_enabled": true,
+                            "name": "secure-config-recorder"
+                        }
+                    },
+                    {
+                        "address": "aws_config_config_rule.secure_rules",
+                        "mode": "managed",
+                        "type": "aws_config_config_rule",
+                        "values": {
+                            "name": "secure-config-rules",
+                            "source": {
+                                "owner": "AWS",
+                                "source_identifier": "REQUIRED_TAGS"
+                            },
+                            "input_parameters": {
+                                "tag1Key": "Environment",
+                                "tag1Value": "prod",
+                                "tag2Key": "SecurityLevel",
+                                "tag2Value": "high"
+                            },
+                            "scope": {
+                                "compliance_resource_types": [
+                                    "AWS::S3::Bucket",
+                                    "AWS::EC2::Instance",
+                                    "AWS::RDS::DBInstance"
+                                ]
+                            }
+                        }
+                    }
+                ]
+            }
+        }
+    }
+
+    // Mock for insecure Config configuration
+    mock_tfplan_insecure_config = {
+        "planned_values": {
+            "root_module": {
+                "resources": [
+                    {
+                        "address": "aws_config_configuration_recorder.insecure_recorder",
+                        "mode": "managed",
+                        "type": "aws_config_configuration_recorder",
+                        "values": {
+                            "name": "insecure-config-recorder",
+                            "recording_group": {
+                                "all_supported": false,
+                                "include_global_resources": false
+                            }
+                        }
+                    },
+                    {
+                        "address": "aws_config_configuration_recorder_status.insecure_recorder_status",
+                        "mode": "managed",
+                        "type": "aws_config_configuration_recorder_status",
+                        "values": {
+                            "is_enabled": false,
+                            "name": "insecure-config-recorder"
+                        }
+                    }
+                ]
+            }
+        }
+    }
+}

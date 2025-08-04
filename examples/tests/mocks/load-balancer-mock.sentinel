@@ -1,0 +1,99 @@
+mock "tfplan/v2" {
+    // Mock for secure load balancer configuration
+    mock_tfplan_secure_lb = {
+        "planned_values": {
+            "root_module": {
+                "resources": [
+                    {
+                        "address": "aws_lb.secure_alb",
+                        "mode": "managed",
+                        "type": "aws_lb",
+                        "values": {
+                            "name": "secure-alb",
+                            "internal": true,
+                            "load_balancer_type": "application",
+                            "security_groups": ["sg-12345"],
+                            "subnets": ["subnet-12345", "subnet-67890"],
+                            "enable_deletion_protection": true,
+                            "enable_http2": true,
+                            "enable_cross_zone_load_balancing": true,
+                            "idle_timeout": 60,
+                            "drop_invalid_header_fields": true,
+                            "access_logs": {
+                                "bucket": "lb-logs-bucket",
+                                "prefix": "secure-alb-logs",
+                                "enabled": true
+                            },
+                            "tags": {
+                                "Name": "secure-alb",
+                                "Environment": "prod"
+                            }
+                        }
+                    },
+                    {
+                        "address": "aws_lb_listener.secure_https",
+                        "mode": "managed",
+                        "type": "aws_lb_listener",
+                        "values": {
+                            "load_balancer_arn": "arn:aws:elasticloadbalancing:us-west-2:123456789012:loadbalancer/app/secure-alb/1234567890",
+                            "port": 443,
+                            "protocol": "HTTPS",
+                            "ssl_policy": "ELBSecurityPolicy-TLS-1-2-2017-01",
+                            "certificate_arn": "arn:aws:acm:us-west-2:123456789012:certificate/12345678-1234-1234-1234-123456789012",
+                            "default_action": [
+                                {
+                                    "type": "forward",
+                                    "target_group_arn": "arn:aws:elasticloadbalancing:us-west-2:123456789012:targetgroup/secure-tg/1234567890"
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        }
+    }
+
+    // Mock for insecure load balancer configuration
+    mock_tfplan_insecure_lb = {
+        "planned_values": {
+            "root_module": {
+                "resources": [
+                    {
+                        "address": "aws_lb.insecure_alb",
+                        "mode": "managed",
+                        "type": "aws_lb",
+                        "values": {
+                            "name": "insecure-alb",
+                            "internal": false,
+                            "load_balancer_type": "application",
+                            "security_groups": ["sg-67890"],
+                            "subnets": ["subnet-abcdef"],
+                            "enable_deletion_protection": false,
+                            "enable_http2": false,
+                            "drop_invalid_header_fields": false,
+                            "access_logs": {
+                                "enabled": false
+                            }
+                        }
+                    },
+                    {
+                        "address": "aws_lb_listener.insecure_http",
+                        "mode": "managed",
+                        "type": "aws_lb_listener",
+                        "values": {
+                            "load_balancer_arn": "arn:aws:elasticloadbalancing:us-west-2:123456789012:loadbalancer/app/insecure-alb/0987654321",
+                            "port": 80,
+                            "protocol": "HTTP",
+                            "default_action": [
+                                {
+                                    "type": "forward",
+                                    "target_group_arn": "arn:aws:elasticloadbalancing:us-west-2:123456789012:targetgroup/insecure-tg/0987654321"
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        }
+    }
+}

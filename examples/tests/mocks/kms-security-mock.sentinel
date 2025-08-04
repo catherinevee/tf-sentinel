@@ -1,0 +1,90 @@
+mock "tfplan/v2" {
+    // Mock for secure KMS configuration
+    mock_tfplan_secure_kms = {
+        "planned_values": {
+            "root_module": {
+                "resources": [
+                    {
+                        "address": "aws_kms_key.secure_key",
+                        "mode": "managed",
+                        "type": "aws_kms_key",
+                        "values": {
+                            "description": "Secure KMS key with rotation",
+                            "enable_key_rotation": true,
+                            "deletion_window_in_days": 30,
+                            "is_enabled": true,
+                            "key_usage": "ENCRYPT_DECRYPT",
+                            "customer_master_key_spec": "SYMMETRIC_DEFAULT",
+                            "policy": {
+                                "Version": "2012-10-17",
+                                "Statement": [
+                                    {
+                                        "Sid": "EnableKeyAdmin",
+                                        "Effect": "Allow",
+                                        "Principal": {
+                                            "AWS": "arn:aws:iam::123456789012:role/KeyAdministrator"
+                                        },
+                                        "Action": [
+                                            "kms:Create*",
+                                            "kms:Describe*",
+                                            "kms:Enable*",
+                                            "kms:List*",
+                                            "kms:Put*",
+                                            "kms:Update*",
+                                            "kms:Revoke*",
+                                            "kms:Disable*",
+                                            "kms:Get*",
+                                            "kms:Delete*",
+                                            "kms:ScheduleKeyDeletion",
+                                            "kms:CancelKeyDeletion"
+                                        ],
+                                        "Resource": "*"
+                                    }
+                                ]
+                            },
+                            "tags": {
+                                "Environment": "prod",
+                                "SecurityLevel": "high"
+                            }
+                        }
+                    }
+                ]
+            }
+        }
+    }
+
+    // Mock for insecure KMS configuration
+    mock_tfplan_insecure_kms = {
+        "planned_values": {
+            "root_module": {
+                "resources": [
+                    {
+                        "address": "aws_kms_key.insecure_key",
+                        "mode": "managed",
+                        "type": "aws_kms_key",
+                        "values": {
+                            "description": "Insecure KMS key without rotation",
+                            "enable_key_rotation": false,
+                            "deletion_window_in_days": 7,
+                            "is_enabled": true,
+                            "policy": {
+                                "Version": "2012-10-17",
+                                "Statement": [
+                                    {
+                                        "Sid": "EnableIAMUserPermissions",
+                                        "Effect": "Allow",
+                                        "Principal": {
+                                            "AWS": "*"
+                                        },
+                                        "Action": "kms:*",
+                                        "Resource": "*"
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                ]
+            }
+        }
+    }
+}

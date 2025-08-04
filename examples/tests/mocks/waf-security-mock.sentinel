@@ -1,0 +1,99 @@
+mock "tfplan/v2" {
+    // Mock for secure WAF configuration
+    mock_tfplan_secure_waf = {
+        "planned_values": {
+            "root_module": {
+                "resources": [
+                    {
+                        "address": "aws_wafv2_web_acl.secure_waf",
+                        "mode": "managed",
+                        "type": "aws_wafv2_web_acl",
+                        "values": {
+                            "name": "secure-waf-acl",
+                            "description": "Secure WAF ACL with comprehensive rules",
+                            "scope": "REGIONAL",
+                            "default_action": {
+                                "allow": {}
+                            },
+                            "rule": [
+                                {
+                                    "name": "AWSManagedRulesCommonRuleSet",
+                                    "priority": 1,
+                                    "override_action": {
+                                        "none": {}
+                                    },
+                                    "statement": {
+                                        "managed_rule_group_statement": {
+                                            "name": "AWSManagedRulesCommonRuleSet",
+                                            "vendor_name": "AWS"
+                                        }
+                                    },
+                                    "visibility_config": {
+                                        "cloudwatch_metrics_enabled": true,
+                                        "metric_name": "AWSManagedRulesCommonRuleSetMetric",
+                                        "sampled_requests_enabled": true
+                                    }
+                                },
+                                {
+                                    "name": "RateLimit",
+                                    "priority": 2,
+                                    "action": {
+                                        "block": {}
+                                    },
+                                    "statement": {
+                                        "rate_based_statement": {
+                                            "limit": 2000,
+                                            "aggregate_key_type": "IP"
+                                        }
+                                    },
+                                    "visibility_config": {
+                                        "cloudwatch_metrics_enabled": true,
+                                        "metric_name": "RateLimitMetric",
+                                        "sampled_requests_enabled": true
+                                    }
+                                }
+                            ],
+                            "visibility_config": {
+                                "cloudwatch_metrics_enabled": true,
+                                "metric_name": "secure-waf-metric",
+                                "sampled_requests_enabled": true
+                            },
+                            "tags": {
+                                "Environment": "prod",
+                                "SecurityLevel": "high"
+                            }
+                        }
+                    }
+                ]
+            }
+        }
+    }
+
+    // Mock for insecure WAF configuration
+    mock_tfplan_insecure_waf = {
+        "planned_values": {
+            "root_module": {
+                "resources": [
+                    {
+                        "address": "aws_wafv2_web_acl.insecure_waf",
+                        "mode": "managed",
+                        "type": "aws_wafv2_web_acl",
+                        "values": {
+                            "name": "insecure-waf-acl",
+                            "description": "Basic WAF ACL without comprehensive rules",
+                            "scope": "REGIONAL",
+                            "default_action": {
+                                "allow": {}
+                            },
+                            "visibility_config": {
+                                "cloudwatch_metrics_enabled": false,
+                                "metric_name": "insecure-waf-metric",
+                                "sampled_requests_enabled": false
+                            }
+                        }
+                    }
+                ]
+            }
+        }
+    }
+}

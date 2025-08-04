@@ -1,0 +1,81 @@
+mock "tfplan/v2" {
+    // Mock for secure GuardDuty configuration
+    mock_tfplan_secure_guardduty = {
+        "planned_values": {
+            "root_module": {
+                "resources": [
+                    {
+                        "address": "aws_guardduty_detector.secure_detector",
+                        "mode": "managed",
+                        "type": "aws_guardduty_detector",
+                        "values": {
+                            "enable": true,
+                            "finding_publishing_frequency": "FIFTEEN_MINUTES",
+                            "datasources": {
+                                "s3_logs": {
+                                    "enable": true
+                                },
+                                "kubernetes": {
+                                    "audit_logs": {
+                                        "enable": true
+                                    }
+                                },
+                                "malware_protection": {
+                                    "scan_ec2_instance_with_findings": {
+                                        "enable": true
+                                    }
+                                }
+                            },
+                            "tags": {
+                                "Environment": "prod",
+                                "SecurityLevel": "high"
+                            }
+                        }
+                    },
+                    {
+                        "address": "aws_guardduty_organization_admin_account.secure_admin",
+                        "mode": "managed",
+                        "type": "aws_guardduty_organization_admin_account",
+                        "values": {
+                            "admin_account_id": "123456789012"
+                        }
+                    }
+                ]
+            }
+        }
+    }
+
+    // Mock for insecure GuardDuty configuration
+    mock_tfplan_insecure_guardduty = {
+        "planned_values": {
+            "root_module": {
+                "resources": [
+                    {
+                        "address": "aws_guardduty_detector.insecure_detector",
+                        "mode": "managed",
+                        "type": "aws_guardduty_detector",
+                        "values": {
+                            "enable": true,
+                            "finding_publishing_frequency": "SIX_HOURS",
+                            "datasources": {
+                                "s3_logs": {
+                                    "enable": false
+                                },
+                                "kubernetes": {
+                                    "audit_logs": {
+                                        "enable": false
+                                    }
+                                },
+                                "malware_protection": {
+                                    "scan_ec2_instance_with_findings": {
+                                        "enable": false
+                                    }
+                                }
+                            }
+                        }
+                    }
+                ]
+            }
+        }
+    }
+}

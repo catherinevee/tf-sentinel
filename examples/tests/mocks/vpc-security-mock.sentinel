@@ -1,0 +1,96 @@
+mock "tfplan/v2" {
+    // Mock for a secure VPC configuration
+    mock_tfplan_secure_vpc = {
+        "planned_values": {
+            "root_module": {
+                "resources": [
+                    {
+                        "address": "aws_vpc.secure_vpc",
+                        "mode": "managed",
+                        "type": "aws_vpc",
+                        "values": {
+                            "cidr_block": "10.0.0.0/16",
+                            "enable_dns_hostnames": true,
+                            "enable_dns_support": true,
+                            "tags": {
+                                "Name": "secure-vpc",
+                                "Environment": "prod"
+                            }
+                        }
+                    },
+                    {
+                        "address": "aws_flow_log.vpc_flow_log",
+                        "mode": "managed",
+                        "type": "aws_flow_log",
+                        "values": {
+                            "log_destination_type": "cloud-watch-logs",
+                            "traffic_type": "ALL",
+                            "vpc_id": "vpc-12345"
+                        }
+                    },
+                    {
+                        "address": "aws_security_group.secure_sg",
+                        "mode": "managed",
+                        "type": "aws_security_group",
+                        "values": {
+                            "ingress": [
+                                {
+                                    "from_port": 443,
+                                    "to_port": 443,
+                                    "protocol": "tcp",
+                                    "cidr_blocks": ["10.0.0.0/8"]
+                                }
+                            ],
+                            "egress": [
+                                {
+                                    "from_port": 0,
+                                    "to_port": 0,
+                                    "protocol": "-1",
+                                    "cidr_blocks": ["0.0.0.0/0"]
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        }
+    }
+
+    // Mock for an insecure VPC configuration
+    mock_tfplan_insecure_vpc = {
+        "planned_values": {
+            "root_module": {
+                "resources": [
+                    {
+                        "address": "aws_vpc.insecure_vpc",
+                        "mode": "managed",
+                        "type": "aws_vpc",
+                        "values": {
+                            "cidr_block": "10.0.0.0/16",
+                            "enable_dns_hostnames": false,
+                            "enable_dns_support": false,
+                            "tags": {
+                                "Name": "insecure-vpc"
+                            }
+                        }
+                    },
+                    {
+                        "address": "aws_security_group.insecure_sg",
+                        "mode": "managed",
+                        "type": "aws_security_group",
+                        "values": {
+                            "ingress": [
+                                {
+                                    "from_port": 0,
+                                    "to_port": 65535,
+                                    "protocol": "-1",
+                                    "cidr_blocks": ["0.0.0.0/0"]
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        }
+    }
+}

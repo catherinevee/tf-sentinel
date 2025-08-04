@@ -1,0 +1,67 @@
+mock "tfplan/v2" {
+    // Mock for secure VPC peering configuration
+    mock_tfplan_secure_vpc_peering = {
+        "planned_values": {
+            "root_module": {
+                "resources": [
+                    {
+                        "address": "aws_vpc_peering_connection.secure_peering",
+                        "mode": "managed",
+                        "type": "aws_vpc_peering_connection",
+                        "values": {
+                            "peer_vpc_id": "vpc-peer123",
+                            "vpc_id": "vpc-main123",
+                            "auto_accept": false,
+                            "peer_region": "us-west-2",
+                            "tags": {
+                                "Name": "secure-peering",
+                                "Environment": "prod",
+                                "SecurityLevel": "high"
+                            },
+                            "accepter": {
+                                "allow_remote_vpc_dns_resolution": true
+                            },
+                            "requester": {
+                                "allow_remote_vpc_dns_resolution": true
+                            }
+                        }
+                    },
+                    {
+                        "address": "aws_vpc_peering_connection_options.secure_options",
+                        "mode": "managed",
+                        "type": "aws_vpc_peering_connection_options",
+                        "values": {
+                            "vpc_peering_connection_id": "pcx-12345",
+                            "requester": {
+                                "allow_remote_vpc_dns_resolution": true
+                            }
+                        }
+                    }
+                ]
+            }
+        }
+    }
+
+    // Mock for insecure VPC peering configuration
+    mock_tfplan_insecure_vpc_peering = {
+        "planned_values": {
+            "root_module": {
+                "resources": [
+                    {
+                        "address": "aws_vpc_peering_connection.insecure_peering",
+                        "mode": "managed",
+                        "type": "aws_vpc_peering_connection",
+                        "values": {
+                            "peer_vpc_id": "vpc-peer456",
+                            "vpc_id": "vpc-main456",
+                            "auto_accept": true,
+                            "tags": {
+                                "Name": "insecure-peering"
+                            }
+                        }
+                    }
+                ]
+            }
+        }
+    }
+}

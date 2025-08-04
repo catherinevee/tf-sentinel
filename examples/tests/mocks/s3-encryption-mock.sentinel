@@ -1,0 +1,54 @@
+mock "tfplan/v2" {
+    // Mock for an S3 bucket with encryption enabled
+    mock_tfplan_s3_encrypted = {
+        "planned_values": {
+            "root_module": {
+                "resources": [
+                    {
+                        "address": "aws_s3_bucket.secure_bucket",
+                        "mode": "managed",
+                        "type": "aws_s3_bucket",
+                        "values": {
+                            "bucket": "secure-bucket",
+                            "server_side_encryption_configuration": {
+                                "rule": {
+                                    "apply_server_side_encryption_by_default": {
+                                        "sse_algorithm": "AES256"
+                                    }
+                                }
+                            },
+                            "versioning": {
+                                "enabled": true
+                            },
+                            "logging": {
+                                "target_bucket": "access-logs",
+                                "target_prefix": "secure-bucket-logs/"
+                            }
+                        }
+                    }
+                ]
+            }
+        }
+    }
+
+    // Mock for an S3 bucket without encryption
+    mock_tfplan_s3_unencrypted = {
+        "planned_values": {
+            "root_module": {
+                "resources": [
+                    {
+                        "address": "aws_s3_bucket.insecure_bucket",
+                        "mode": "managed",
+                        "type": "aws_s3_bucket",
+                        "values": {
+                            "bucket": "insecure-bucket",
+                            "versioning": {
+                                "enabled": false
+                            }
+                        }
+                    }
+                ]
+            }
+        }
+    }
+}
