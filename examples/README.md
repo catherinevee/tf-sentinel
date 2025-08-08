@@ -1,4 +1,8 @@
-# Example showing how to run and test Sentinel policies
+# Examples for AWS-Specific Sentinel Policies
+
+This directory contains examples showing how to run and test Sentinel policies designed for AWS environments.
+
+## Running AWS-Specific Sentinel Tests
 
 # 1. Initialize sentinel test environment
 sentinel test security-policy.sentinel

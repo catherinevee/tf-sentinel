@@ -1,12 +1,12 @@
-# Policy: Main Policy Enforcement
-# Purpose: Main sentinel policy that imports and enforces all child policies
-# Scope: All resources
+# Policy: Main AWS Policy Enforcement
+# Purpose: Main sentinel policy that imports and enforces all AWS-specific child policies
+# Scope: All AWS resources
 # Enforcement: hard-mandatory
 #
 # Validates:
-# - All security policies
-# - All cost control policies
-# - All compliance policies
+# - All AWS security policies
+# - All AWS cost control policies
+# - All AWS compliance policies
 
 # Import common functions and rules
 import "tfplan/v2" as tfplan

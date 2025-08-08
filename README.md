@@ -1,8 +1,9 @@
 # tf-sentinel
 
-This repository contains Sentinel and Open Policy Agent (OPA) policies for enforcing security, compliance, and operational best practices in Terraform workflows.
+This repository contains Sentinel and Open Policy Agent (OPA) policies for enforcing security, compliance, and operational best practices in **AWS-specific** Terraform workflows. The policies are designed specifically for AWS resources and services, providing comprehensive governance for AWS cloud environments.
 
 ## Table of Contents
+- [AWS Focus](#aws-focus)
 - [Prerequisites](#prerequisites)
 - [Sentinel Integration](#sentinel-integration)
 - [OPA Integration](#opa-integration)
@@ -11,21 +12,41 @@ This repository contains Sentinel and Open Policy Agent (OPA) policies for enfor
 - [Testing](#testing)
 - [Contributing](#contributing)
 
+## AWS Focus
+
+This repository is specifically designed for **AWS environments** and includes policies for:
+
+- **AWS Security Services**: S3, RDS, EBS, Secrets Manager, KMS, IAM, Security Groups, NACLs
+- **AWS Compute Services**: EC2, Lambda, ECS, EKS, Auto Scaling Groups
+- **AWS Storage Services**: S3, EBS, EFS, FSx
+- **AWS Database Services**: RDS, DynamoDB, Redshift, ElastiCache
+- **AWS Network Services**: VPC, Subnets, Route Tables, NAT Gateways, Load Balancers
+- **AWS Monitoring & Logging**: CloudWatch, CloudTrail, VPC Flow Logs
+- **AWS Cost Management**: Resource tagging, instance sizing, reserved instances
+
+All policies are written with AWS resource types, attributes, and best practices in mind. They enforce AWS Well-Architected Framework principles including security, reliability, performance efficiency, cost optimization, and operational excellence.
+
 ## Prerequisites
 
 ### For Sentinel:
 - Terraform Enterprise or Terraform Cloud account
 - Sentinel CLI (for local testing)
 - Terraform CLI
+- AWS CLI configured with appropriate credentials
+- AWS account with necessary permissions
 
 ### For OPA:
 - OPA CLI
 - conftest (optional, for easier testing)
+- AWS CLI configured with appropriate credentials
+- AWS account with necessary permissions
 
 ### For Terragrunt:
 - Terragrunt CLI
 - Terraform CLI
 - jq (for JSON processing)
+- AWS CLI configured with appropriate credentials
+- AWS account with necessary permissions
 
 ## Terragrunt Integration
 
@@ -133,27 +154,52 @@ This repository contains Sentinel and Open Policy Agent (OPA) policies for enfor
 
 ## Policy Structure
 
-### Sentinel Policies
+### Sentinel Policies for AWS
 ```hcl
 import "tfplan/v2" as tfplan
 
-# Policy rule
-<policy_name> = rule {
-    all tfplan.resources.<resource_type> as _, resource {
-        # Policy conditions
+# Example: Enforce encryption on AWS S3 buckets
+aws_s3_encryption_required = rule {
+    all tfplan.resources.aws_s3_bucket as _, bucket {
+        bucket.applied.server_side_encryption_configuration is not null
+    }
+}
+
+# Example: Ensure AWS EC2 instances are not publicly accessible
+aws_ec2_no_public_ip = rule {
+    all tfplan.resources.aws_instance as _, instance {
+        instance.applied.associate_public_ip_address is false
     }
 }
 ```
 
-### OPA Policies
+### OPA Policies for AWS
 ```rego
-package terraform.policies
+package terraform.aws.policies
 
-# Policy rule
+# Example: Deny AWS resources without proper encryption
 deny[msg] {
     resource := input.resource_changes[_]
-    # Policy conditions
-    msg := sprintf("Policy violation: %v", [resource.address])
+    aws_encrypted_resources := ["aws_s3_bucket", "aws_rds_instance", "aws_ebs_volume"]
+    resource.type == aws_encrypted_resources[_]
+    not is_encrypted(resource)
+    msg := sprintf("AWS Policy violation: %v must have encryption enabled", [resource.address])
+}
+
+# Helper function to check encryption for different AWS resource types
+is_encrypted(resource) {
+    resource.type == "aws_s3_bucket"
+    resource.change.after.server_side_encryption_configuration != null
+}
+
+is_encrypted(resource) {
+    resource.type == "aws_rds_instance"
+    resource.change.after.storage_encrypted == true
+}
+
+is_encrypted(resource) {
+    resource.type == "aws_ebs_volume"
+    resource.change.after.encrypted == true
 }
 ```
 
@@ -320,20 +366,23 @@ deny[msg] {
            files: \.tf$
    ```
 
-### Common Policy Patterns
+### Common AWS Policy Patterns
 
-1. **Resource Tagging**:
+1. **AWS Resource Tagging**:
    ```rego
    deny[msg] {
        resource := input.resource_changes[_]
-       required_tags := ["Environment", "Owner", "CostCenter"]
+       # Check AWS resources that support tagging
+       aws_resources := ["aws_instance", "aws_s3_bucket", "aws_rds_instance", "aws_vpc"]
+       resource.type == aws_resources[_]
+       required_tags := ["Environment", "Owner", "CostCenter", "Project"]
        tag := required_tags[_]
        not resource.change.after.tags[tag]
-       msg := sprintf("Resource %v missing required tag: %v", [resource.address, tag])
+       msg := sprintf("AWS Resource %v missing required tag: %v", [resource.address, tag])
    }
    ```
 
-2. **Security Controls**:
+2. **AWS Security Group Controls**:
    ```rego
    deny[msg] {
        sg := input.resource_changes[_]
@@ -341,7 +390,27 @@ deny[msg] {
        rule := sg.change.after.ingress[_]
        rule.cidr_blocks[_] == "0.0.0.0/0"
        rule.to_port == 22
-       msg := "SSH port 22 cannot be open to 0.0.0.0/0"
+       msg := sprintf("AWS Security Group %v: SSH port 22 cannot be open to 0.0.0.0/0", [sg.address])
+   }
+   ```
+
+3. **AWS S3 Bucket Security**:
+   ```rego
+   deny[msg] {
+       bucket := input.resource_changes[_]
+       bucket.type == "aws_s3_bucket"
+       bucket.change.after.acl == "public-read"
+       msg := sprintf("AWS S3 Bucket %v cannot have public-read ACL", [bucket.address])
+   }
+   ```
+
+4. **AWS RDS Encryption**:
+   ```rego
+   deny[msg] {
+       rds := input.resource_changes[_]
+       rds.type == "aws_db_instance"
+       not rds.change.after.storage_encrypted
+       msg := sprintf("AWS RDS instance %v must have storage encryption enabled", [rds.address])
    }
    ```
 
@@ -378,9 +447,13 @@ The repository includes mock data for testing in:
 4. Add or modify policies
 5. Submit a pull request
 
-### Policy Guidelines
-- Write clear policy names and descriptions
-- Include comprehensive tests
-- Document any assumptions or prerequisites
-- Follow existing policy structure
-- Include both positive and negative test cases
+### Policy Guidelines for AWS
+- **AWS-Specific Focus**: All policies must target AWS resources and services
+- Write clear policy names and descriptions that specify AWS resource types
+- Include comprehensive tests using AWS mock data
+- Document any AWS-specific assumptions or prerequisites
+- Follow existing policy structure for AWS resources
+- Include both positive and negative test cases with AWS scenarios
+- Reference AWS Well-Architected Framework principles where applicable
+- Use AWS resource naming conventions (e.g., `aws_s3_bucket`, `aws_ec2_instance`)
+- Consider AWS regional differences and availability zones in policies

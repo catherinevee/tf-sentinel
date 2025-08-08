@@ -1,5 +1,6 @@
-# HashiCorp Sentinel Configuration
+# HashiCorp Sentinel Configuration for AWS Environments
 # This file specifies the policy sets and their enforcement levels
+# All policies are designed for AWS resources and services
 
 policy "encryption-policy" {
     source = "./policies/security/encryption-policy.sentinel"
