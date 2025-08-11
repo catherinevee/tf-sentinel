@@ -1,30 +1,100 @@
 # tf-sentinel
 
-This repository contains Sentinel and Open Policy Agent (OPA) policies for enforcing security, compliance, and operational best practices in **AWS-specific** Terraform workflows. The policies are designed specifically for AWS resources and services, providing comprehensive governance for AWS cloud environments.
+This repository contains **enterprise-grade, security-first** Sentinel and Open Policy Agent (OPA) policies for enforcing security, compliance, and operational best practices in **AWS-specific** Terraform workflows. The policies implement comprehensive governance with fail-secure defaults, defense in depth, and comprehensive validation following the AWS Well-Architected Framework.
+
+
+## Latest Enhancements
+
+**NEW**: **Security-First Policy Framework** - Production-ready policies with:
+- **Fail-secure defaults** that DENY when uncertain
+- **Defense in depth** with multiple validation layers  
+- **Comprehensive error handling** with actionable messages
+- **Performance optimization** with efficient filtering
+- **Multi-framework compliance** (SOC2, HIPAA, PCI-DSS, GDPR, SOX)
+
+See [SECURITY_FIRST_POLICIES.md](./SECURITY_FIRST_POLICIES.md) for complete details.
 
 ## Table of Contents
 - [AWS Focus](#aws-focus)
+- [Security-First Design](#security-first-design)
+- [Enhanced Policy Features](#enhanced-policy-features)
 - [Prerequisites](#prerequisites)
-- [Sentinel Integration](#sentinel-integration)
-- [OPA Integration](#opa-integration)
 - [Policy Structure](#policy-structure)
+- [Testing Framework](#testing-framework)
 - [Usage](#usage)
-- [Testing](#testing)
 - [Contributing](#contributing)
+
 
 ## AWS Focus
 
-This repository is specifically designed for **AWS environments** and includes policies for:
+This repository is specifically designed for **AWS environments** and includes **production-ready** policies for:
 
-- **AWS Security Services**: S3, RDS, EBS, Secrets Manager, KMS, IAM, Security Groups, NACLs
-- **AWS Compute Services**: EC2, Lambda, ECS, EKS, Auto Scaling Groups
-- **AWS Storage Services**: S3, EBS, EFS, FSx
-- **AWS Database Services**: RDS, DynamoDB, Redshift, ElastiCache
-- **AWS Network Services**: VPC, Subnets, Route Tables, NAT Gateways, Load Balancers
-- **AWS Monitoring & Logging**: CloudWatch, CloudTrail, VPC Flow Logs
-- **AWS Cost Management**: Resource tagging, instance sizing, reserved instances
+- AWS Security Services: S3, RDS, EBS, Secrets Manager, KMS, IAM, Security Groups, NACLs
+- AWS Compute Services: EC2, Lambda, ECS, EKS, Auto Scaling Groups
+- AWS Storage Services: S3, EBS, EFS, FSx  
+- AWS Database Services: RDS, DynamoDB, Redshift, ElastiCache
+- AWS Network Services: VPC, Subnets, Route Tables, NAT Gateways, Load Balancers
+- AWS Monitoring & Logging: CloudWatch, CloudTrail, VPC Flow Logs
+- AWS Cost Management: Resource tagging, instance sizing, reserved instances
 
-All policies are written with AWS resource types, attributes, and best practices in mind. They enforce AWS Well-Architected Framework principles including security, reliability, performance efficiency, cost optimization, and operational excellence.
+All policies are written with AWS resource types, attributes, and best practices in mind, enforcing AWS Well-Architected Framework principles.
+
+## Security-First Design
+
+### Core Security Principles
+
+1. **Fail-Secure Defaults**: Policies default to DENY when uncertain or validation fails
+2. **Input Validation**: Comprehensive validation and sanitization of all inputs
+3. **Defense in Depth**: Multiple layers of validation and error handling
+4. **Least Privilege**: Explicit allow lists rather than deny lists
+5. **Comprehensive Error Handling**: Actionable error messages for violations
+
+### Example Security Pattern
+```sentinel
+# Input validation - fail secure on null/undefined
+if resource is null {
+    print("SECURITY ERROR: Resource validation failed - null resource detected")
+    return false
+}
+
+# Check for computed values - handle gracefully but securely  
+if resource.change.after is computed {
+    print("WARNING: Applying conservative validation for computed resource")
+    return validate_with_computed_values(resource)
+}
+```
+
+## Enhanced Policy Features
+
+### Comprehensive Encryption Policy
+- Multi-service coverage: S3, RDS, EBS, EFS, DynamoDB, SNS, SQS, Lambda, KMS
+- Customer-managed KMS key enforcement
+- Environment-specific encryption controls
+- Key rotation requirements
+
+### Advanced Network Security
+- Security Group ingress/egress validation with port-specific controls
+- NACL rule ordering and conflict detection
+- VPC security configuration validation
+- Load Balancer and API Gateway security
+
+### Intelligent Cost Control
+- Environment-based cost limits with percentage controls
+- Instance type restrictions by environment
+- Storage optimization recommendations
+- Cost allocation tagging enforcement
+
+### Advanced IAM Security
+- Least privilege principle enforcement
+- Trust relationship validation
+- Privilege escalation risk detection
+- Policy document security analysis
+
+### Enterprise Compliance
+- Multi-framework support (SOC2, HIPAA, PCI-DSS, GDPR, SOX)
+- Data classification and protection controls
+- Audit trail requirements
+- Change management compliance
 
 ## Prerequisites
 

@@ -1,0 +1,23 @@
+# Mock data for resources with computed values
+# This should pass with conservative validation
+
+resource_changes = {
+  "aws_s3_bucket.computed": {
+    "address": "aws_s3_bucket.computed",
+    "mode": "managed",
+    "type": "aws_s3_bucket",
+    "change": {
+      "actions": ["create"],
+      "after": "computed"
+    }
+  },
+  "aws_db_instance.computed": {
+    "address": "aws_db_instance.computed", 
+    "mode": "managed",
+    "type": "aws_db_instance",
+    "change": {
+      "actions": ["create"],
+      "after": "computed"
+    }
+  }
+}

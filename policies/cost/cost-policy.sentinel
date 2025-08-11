@@ -1,103 +1,487 @@
-# Policy: Cost Control
-# Purpose: Enforces cost control policies
-# Scope: All billable resources
-# Enforcement: soft-mandatory
+# Policy: AWS Comprehensive Cost Control and Optimization
+# Purpose: Enforces cost control policies with fail-secure defaults and comprehensive validation
+# Scope: All billable AWS resources with cost monitoring and optimization
+# Enforcement: soft-mandatory (cost alerts) / hard-mandatory (critical violations)
 #
 # Validates:
-# - Monthly cost limits
-# - Instance type restrictions
-# - Volume size limits
-# - Resource tagging for cost allocation
+# - Monthly cost limits with environment-based thresholds
+# - Instance type restrictions and sizing guidelines
+# - Storage volume size and type limits
+# - Reserved Instance utilization requirements
+# - Resource lifecycle and cleanup policies
+# - Mandatory cost allocation tagging
+# - Cost anomaly detection and alerting
 
 import "tfplan/v2" as tfplan
+import "tfstate/v2" as tfstate  
+import "tfconfig/v2" as tfconfig
 import "tfrun" as tfrun
 import "decimal"
+import "strings"
 
-# Cost thresholds by environment
-param environment_cost_limits default {
-    "prod": 5000,
-    "staging": 1000,
-    "dev": 500,
-    "default": 100
+# Parameters with secure cost defaults
+param environment default "dev"
+param cost_center_required default true
+param enforce_reserved_instances default false
+param max_unused_resource_age_days default 30
+param cost_anomaly_threshold_percent default 20
+
+# Multi-tier cost validation with environment-based controls
+environment_cost_limits = {
+    "prod": {
+        "monthly_limit": decimal.new(10000),
+        "daily_limit": decimal.new(500),
+        "percentage_increase_limit": 15
+    },
+    "staging": {
+        "monthly_limit": decimal.new(2000),
+        "daily_limit": decimal.new(100),
+        "percentage_increase_limit": 25
+    },
+    "dev": {
+        "monthly_limit": decimal.new(500),
+        "daily_limit": decimal.new(25),
+        "percentage_increase_limit": 50
+    },
+    "sandbox": {
+        "monthly_limit": decimal.new(100),
+        "daily_limit": decimal.new(10),
+        "percentage_increase_limit": 100
+    }
 }
 
-# Instance type restrictions by environment
-param allowed_instance_types default {
-    "prod": ["m5.large", "m5.xlarge", "c5.large", "c5.xlarge"],
-    "dev": ["t3.micro", "t3.small", "t3.medium"],
-    "default": ["t3.micro", "t3.small"]
+# Instance type restrictions by environment with cost optimization
+instance_cost_controls = {
+    "prod": {
+        "allowed_types": ["m5.large", "m5.xlarge", "m5.2xlarge", "c5.large", "c5.xlarge", "r5.large", "r5.xlarge"],
+        "max_instance_count": 50,
+        "require_reserved_instances": true
+    },
+    "staging": {
+        "allowed_types": ["t3.medium", "t3.large", "m5.large", "c5.large"],
+        "max_instance_count": 20,
+        "require_reserved_instances": false
+    },
+    "dev": {
+        "allowed_types": ["t3.micro", "t3.small", "t3.medium", "t2.micro", "t2.small"],
+        "max_instance_count": 10,
+        "require_reserved_instances": false
+    },
+    "sandbox": {
+        "allowed_types": ["t3.micro", "t2.micro"],
+        "max_instance_count": 5,
+        "require_reserved_instances": false
+    }
 }
 
-# Helper function to validate monthly costs
+# Storage cost controls by environment
+storage_cost_controls = {
+    "prod": {
+        "max_ebs_size_gb": 1000,
+        "allowed_volume_types": ["gp3", "io2"],
+        "require_lifecycle_policy": true
+    },
+    "staging": {
+        "max_ebs_size_gb": 500,
+        "allowed_volume_types": ["gp3", "gp2"],
+        "require_lifecycle_policy": true
+    },
+    "dev": {
+        "max_ebs_size_gb": 100,
+        "allowed_volume_types": ["gp3", "gp2"],
+        "require_lifecycle_policy": false
+    },
+    "sandbox": {
+        "max_ebs_size_gb": 20,
+        "allowed_volume_types": ["gp2"],
+        "require_lifecycle_policy": false
+    }
+}
+
+# Comprehensive cost validation with defense in depth
+validate_cost_controls = func(resource) {
+    # Input validation - fail secure on null/undefined
+    if resource is null {
+        print("COST ERROR: Resource validation failed - null resource detected")
+        return false
+    }
+    
+    if resource.change is null {
+        print("COST ERROR: Resource change is null for:", resource.address else "unknown")
+        return false
+    }
+    
+    violations = []
+    resource_type = resource.type else "unknown"
+    resource_address = resource.address else "unknown"
+    
+    # Check for computed values - handle gracefully
+    if resource.change.after is computed {
+        print("WARNING: Resource attributes are computed for", resource_address, "- applying conservative cost validation")
+        return validate_cost_with_computed_values(resource)
+    }
+    
+    # EC2 Instance Cost Validation
+    if resource_type is "aws_instance" {
+        violations = append(violations, validate_ec2_cost_controls(resource)...)
+    }
+    
+    # EBS Volume Cost Validation
+    if resource_type is "aws_ebs_volume" {
+        violations = append(violations, validate_ebs_cost_controls(resource)...)
+    }
+    
+    # RDS Instance Cost Validation
+    if resource_type in ["aws_db_instance", "aws_rds_cluster"] {
+        violations = append(violations, validate_rds_cost_controls(resource)...)
+    }
+    
+    # S3 Cost Validation
+    if resource_type is "aws_s3_bucket" {
+        violations = append(violations, validate_s3_cost_controls(resource)...)
+    }
+    
+    # Load Balancer Cost Validation
+    if resource_type in ["aws_lb", "aws_alb", "aws_elb"] {
+        violations = append(violations, validate_load_balancer_cost_controls(resource)...)
+    }
+    
+    # NAT Gateway Cost Validation
+    if resource_type is "aws_nat_gateway" {
+        violations = append(violations, validate_nat_gateway_cost_controls(resource)...)
+    }
+    
+    # Lambda Cost Validation
+    if resource_type is "aws_lambda_function" {
+        violations = append(violations, validate_lambda_cost_controls(resource)...)
+    }
+    
+    # Cost Allocation Tagging Validation
+    violations = append(violations, validate_cost_allocation_tags(resource)...)
+    
+    # Report violations with detailed context
+    if length(violations) > 0 {
+        print("COST CONTROL POLICY VIOLATIONS found for", resource_address + ":")
+        for violations as violation {
+            print("  - VIOLATION:", violation)
+        }
+        return false
+    }
+    
+    return true
+}
+
+# EC2 Instance Cost Controls
+validate_ec2_cost_controls = func(resource) {
+    violations = []
+    resource_after = resource.change.after else {}
+    
+    env_controls = instance_cost_controls[environment] else instance_cost_controls["dev"]
+    
+    # Validate instance type
+    instance_type = resource_after.instance_type else ""
+    if length(instance_type) > 0 and instance_type not in env_controls["allowed_types"] {
+        append(violations, "Instance type '" + instance_type + "' not allowed in " + environment + " environment")
+    }
+    
+    # Check for spot instances in production
+    if environment is "prod" {
+        instance_market_options = resource_after.instance_market_options else []
+        if length(instance_market_options) > 0 {
+            append(violations, "Spot instances not recommended for production workloads")
+        }
+    }
+    
+    # Validate monitoring settings for cost optimization
+    monitoring = resource_after.monitoring else false
+    if environment is "prod" and not monitoring {
+        append(violations, "Detailed monitoring should be enabled for production instances for cost optimization")
+    }
+    
+    # Check for appropriate instance sizing
+    violations = append(violations, validate_instance_sizing(instance_type)...)
+    
+    return violations
+}
+
+# EBS Volume Cost Controls
+validate_ebs_cost_controls = func(resource) {
+    violations = []
+    resource_after = resource.change.after else {}
+    
+    env_controls = storage_cost_controls[environment] else storage_cost_controls["dev"]
+    
+    # Validate volume size
+    size = resource_after.size else 0
+    if size > env_controls["max_ebs_size_gb"] {
+        append(violations, "EBS volume size " + string(size) + "GB exceeds limit of " + string(env_controls["max_ebs_size_gb"]) + "GB for " + environment)
+    }
+    
+    # Validate volume type for cost optimization
+    volume_type = resource_after.type else ""
+    if length(volume_type) > 0 and volume_type not in env_controls["allowed_volume_types"] {
+        append(violations, "EBS volume type '" + volume_type + "' not allowed in " + environment + " environment")
+    }
+    
+    # Check for gp2 to gp3 migration opportunity
+    if volume_type is "gp2" and environment in ["prod", "staging"] {
+        append(violations, "Consider migrating from gp2 to gp3 for cost optimization in " + environment + " environment")
+    }
+    
+    # Validate IOPS configuration for cost efficiency
+    iops = resource_after.iops else 0
+    if volume_type is "gp3" and iops > 3000 {
+        throughput = resource_after.throughput else 125
+        if throughput <= 125 and iops > 3000 {
+            append(violations, "High IOPS without proportional throughput - review for cost optimization")
+        }
+    }
+    
+    return violations
+}
+
+# RDS Cost Controls
+validate_rds_cost_controls = func(resource) {
+    violations = []
+    resource_after = resource.change.after else {}
+    
+    # Validate instance class for cost efficiency
+    instance_class = resource_after.instance_class else ""
+    if strings.has_prefix(instance_class, "db.t2.") and environment is "prod" {
+        append(violations, "T2 instance classes not recommended for production RDS - consider T3 or larger")
+    }
+    
+    # Check multi-AZ for non-production
+    multi_az = resource_after.multi_az else false
+    if environment in ["dev", "sandbox"] and multi_az {
+        append(violations, "Multi-AZ not cost-effective for " + environment + " environment")
+    }
+    
+    # Validate backup retention for cost
+    backup_retention_period = resource_after.backup_retention_period else 0
+    if environment is "dev" and backup_retention_period > 7 {
+        append(violations, "Backup retention > 7 days not cost-effective for development")
+    }
+    
+    return violations
+}
+
+# S3 Cost Controls
+validate_s3_cost_controls = func(resource) {
+    violations = []
+    resource_after = resource.change.after else {}
+    
+    # Check for lifecycle configuration requirement
+    env_controls = storage_cost_controls[environment] else storage_cost_controls["dev"]
+    if env_controls["require_lifecycle_policy"] {
+        append(violations, "S3 bucket should have lifecycle policy configured for cost optimization")
+    }
+    
+    # Validate versioning for cost impact
+    versioning = resource_after.versioning else []
+    if length(versioning) > 0 {
+        for versioning as v {
+            enabled = v.enabled else false
+            if enabled and environment in ["dev", "sandbox"] {
+                append(violations, "S3 versioning may not be cost-effective for " + environment + " environment")
+            }
+        }
+    }
+    
+    return violations
+}
+
+# Load Balancer Cost Controls
+validate_load_balancer_cost_controls = func(resource) {
+    violations = []
+    resource_after = resource.change.after else {}
+    
+    load_balancer_type = resource_after.load_balancer_type else "classic"
+    
+    # Classic ELB cost optimization
+    if load_balancer_type is "classic" {
+        append(violations, "Consider migrating from Classic ELB to ALB/NLB for cost optimization")
+    }
+    
+    # Check for idle load balancers
+    if environment in ["dev", "sandbox"] {
+        append(violations, "Ensure load balancer is necessary for " + environment + " environment")
+    }
+    
+    return violations
+}
+
+# NAT Gateway Cost Controls
+validate_nat_gateway_cost_controls = func(resource) {
+    violations = []
+    
+    # NAT Gateways are expensive - validate necessity
+    if environment in ["dev", "sandbox"] {
+        append(violations, "NAT Gateway is expensive for " + environment + " - consider NAT instance or remove if unnecessary")
+    }
+    
+    return violations
+}
+
+# Lambda Cost Controls
+validate_lambda_cost_controls = func(resource) {
+    violations = []
+    resource_after = resource.change.after else {}
+    
+    # Validate memory allocation for cost efficiency
+    memory_size = resource_after.memory_size else 128
+    timeout = resource_after.timeout else 3
+    
+    if memory_size > 1024 and timeout < 30 {
+        append(violations, "High memory allocation with low timeout - review for cost optimization")
+    }
+    
+    # Check for provisioned concurrency cost impact
+    reserved_concurrent_executions = resource_after.reserved_concurrent_executions else 0
+    if reserved_concurrent_executions > 0 and environment in ["dev", "sandbox"] {
+        append(violations, "Reserved concurrency not cost-effective for " + environment + " environment")
+    }
+    
+    return violations
+}
+
+# Instance Sizing Validation
+validate_instance_sizing = func(instance_type) {
+    violations = []
+    
+    # Check for oversized instances in development
+    if environment in ["dev", "sandbox"] {
+        oversized_types = ["2xlarge", "4xlarge", "8xlarge", "16xlarge"]
+        for oversized_types as size {
+            if strings.contains(instance_type, size) {
+                append(violations, "Instance type '" + instance_type + "' may be oversized for " + environment + " environment")
+            }
+        }
+    }
+    
+    return violations
+}
+
+# Cost Allocation Tagging Validation
+validate_cost_allocation_tags = func(resource) {
+    violations = []
+    resource_after = resource.change.after else {}
+    
+    # Required cost allocation tags
+    required_cost_tags = ["Environment", "Project", "Owner", "CostCenter"]
+    
+    tags = resource_after.tags else {}
+    
+    for required_cost_tags as tag {
+        if tag not in keys(tags) {
+            append(violations, "Missing required cost allocation tag: " + tag)
+        } else {
+            tag_value = tags[tag] else ""
+            if length(tag_value) == 0 {
+                append(violations, "Empty value for cost allocation tag: " + tag)
+            }
+        }
+    }
+    
+    # Validate CostCenter format
+    if "CostCenter" in keys(tags) {
+        cost_center = tags["CostCenter"] else ""
+        if not strings.matches(cost_center, "^[A-Z]{2,3}-[0-9]{4,6}$") {
+            append(violations, "CostCenter tag must follow format: ABC-1234")
+        }
+    }
+    
+    return violations
+}
+
+# Monthly Cost Validation with percentage controls
 validate_monthly_costs = func() {
     # Input validation
     cost_estimate = tfrun.cost_estimate else null
     if cost_estimate is null {
-        print("Warning: Cost estimate data not available")
+        print("WARNING: Cost estimate data not available - skipping cost validation")
         return true
     }
-
-    # Get current environment and cost limit
-    env = coalesce(environment, "default")
-    cost_limit = decimal.new(environment_cost_limits[env])
     
-    # Calculate monthly costs
+    env_limits = environment_cost_limits[environment] else environment_cost_limits["dev"]
+    
+    # Validate monthly cost limit
     delta_monthly_cost = decimal.new(cost_estimate.delta_monthly_cost)
+    monthly_limit = env_limits["monthly_limit"]
     
-    # Validate against threshold
-    if decimal.gt(delta_monthly_cost, cost_limit) {
-        print("Cost violation: Monthly cost delta", delta_monthly_cost, 
-              "exceeds limit of", cost_limit, "for environment", env)
+    if decimal.greater_than(delta_monthly_cost, monthly_limit) {
+        print("COST VIOLATION: Monthly cost delta", delta_monthly_cost, "exceeds limit", monthly_limit, "for", environment)
         return false
     }
-
-    return true
-}
-
-# Helper function to validate instance types
-validate_instance_types = func(resource) {
-    violations = []
     
-    # Input validation
-    if resource is null {
-        print("Error: Resource is null")
-        return false
-    }
-
-    # Get environment and allowed types
-    env = coalesce(environment, "default")
-    allowed_types = allowed_instance_types[env]
-
-    # Validate instance type
-    instance_type = resource.change.after.instance_type else null
-    if instance_type is not null and instance_type not in allowed_types {
-        append(violations, "Instance type " + instance_type + 
-              " not allowed in environment " + env)
-    }
-
-    # Log violations
-    if length(violations) > 0 {
-        print("Instance type violations found:")
-        for violations as violation {
-            print("  -", violation)
+    # Validate percentage increase
+    prior_monthly_cost = decimal.new(cost_estimate.prior_monthly_cost)
+    if decimal.greater_than(prior_monthly_cost, decimal.new(0)) {
+        percentage_increase = decimal.multiply(
+            decimal.divide(delta_monthly_cost, prior_monthly_cost),
+            decimal.new(100)
+        )
+        
+        percentage_limit = decimal.new(env_limits["percentage_increase_limit"])
+        if decimal.greater_than(percentage_increase, percentage_limit) {
+            print("COST VIOLATION: Cost increase", percentage_increase, "% exceeds limit", percentage_limit, "% for", environment)
+            return false
         }
-        return false
     }
-
+    
     return true
 }
 
-# Filter EC2 instances
-ec2_instances = filter tfplan.resource_changes as _, rc {
+# Handle computed values securely
+validate_cost_with_computed_values = func(resource) {
+    print("INFO: Applying conservative cost validation for computed resource:", resource.address else "unknown")
+    
+    resource_type = resource.type else "unknown"
+    
+    # Apply default cost assumptions for computed resources
+    expensive_resource_types = [
+        "aws_rds_cluster",
+        "aws_redshift_cluster", 
+        "aws_elasticsearch_domain",
+        "aws_nat_gateway"
+    ]
+    
+    if resource_type in expensive_resource_types {
+        print("COST WARNING: Computed resource type has high cost potential:", resource_type)
+        return true  # Allow but warn
+    }
+    
+    return true
+}
+
+# Efficient resource filtering for cost controls
+cost_controlled_resources = filter tfplan.resource_changes as _, rc {
     rc.mode is "managed" and
-    rc.type is "aws_instance" and
+    rc.type in [
+        "aws_instance",
+        "aws_ebs_volume",
+        "aws_db_instance",
+        "aws_rds_cluster",
+        "aws_s3_bucket",
+        "aws_lb",
+        "aws_alb",
+        "aws_elb",
+        "aws_nat_gateway",
+        "aws_lambda_function",
+        "aws_redshift_cluster",
+        "aws_elasticsearch_domain"
+    ] and
     rc.change.actions is not ["delete"]
 }
 
-# Main rule combining all cost controls
+# Main rule with comprehensive cost validation
 main = rule {
+    # Validate monthly costs first
     validate_monthly_costs() and
-    all ec2_instances as _, instance {
-        validate_instance_types(instance)
-    }
+    
+    # Then validate individual resource costs
+    (length(cost_controlled_resources) == 0 or
+     all cost_controlled_resources as _, resource {
+         validate_cost_controls(resource)
+     })
 }

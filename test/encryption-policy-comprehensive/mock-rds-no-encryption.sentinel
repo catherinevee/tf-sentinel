@@ -1,0 +1,21 @@
+# Mock data for RDS instance without encryption
+# This should trigger policy violations
+
+resource_changes = {
+  "aws_db_instance.insecure": {
+    "address": "aws_db_instance.insecure",
+    "mode": "managed",
+    "type": "aws_db_instance", 
+    "change": {
+      "actions": ["create"],
+      "after": {
+        "identifier": "insecure-db-instance",
+        "storage_encrypted": false,
+        "tags": {
+          "Environment": "dev",
+          "Project": "test-app"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,22 @@
+# Mock data for S3 bucket without encryption
+# This should trigger policy violations
+
+resource_changes = {
+  "aws_s3_bucket.insecure": {
+    "address": "aws_s3_bucket.insecure",
+    "mode": "managed",
+    "type": "aws_s3_bucket",
+    "change": {
+      "actions": ["create"],
+      "after": {
+        "bucket": "insecure-bucket-example",
+        "server_side_encryption_configuration": [],
+        "bucket_key_enabled": false,
+        "tags": {
+          "Environment": "dev",
+          "Project": "test-app"
+        }
+      }
+    }
+  }
+}

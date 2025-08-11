@@ -1,0 +1,11 @@
+# Mock data for tfrun context
+# Provides workspace and cost estimation data
+
+workspace = {
+  "name": "production-workspace"
+}
+
+cost_estimate = {
+  "delta_monthly_cost": "150.00",
+  "prior_monthly_cost": "1000.00"
+}

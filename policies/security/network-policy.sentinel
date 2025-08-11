@@ -1,85 +1,448 @@
-# Policy: Network Security Controls
-# Purpose: Ensures network security best practices
-# Scope: AWS Security Groups, VPC, NACLs
+# Policy: AWS Comprehensive Network Security Enforcement
+# Purpose: Enforces network security best practices with defense in depth and fail-secure defaults
+# Scope: Security Groups, NACLs, VPCs, Subnets, Load Balancers, API Gateways
 # Enforcement: hard-mandatory
 #
 # Validates:
-# - No public SSH/RDP access
-# - Restricted ingress CIDR ranges
-# - Required security group rules
+# - Security Group ingress/egress rules with least privilege
+# - NACL rules for network segmentation
+# - VPC security settings and flow logs
+# - Subnet public/private configuration
+# - Load Balancer security configurations
+# - API Gateway security settings
+# - Network interface security
 
 import "tfplan/v2" as tfplan
 import "tfstate/v2" as tfstate  
 import "tfconfig/v2" as tfconfig
+import "tfrun" as tfrun
+import "strings"
 
 # Parameters with secure defaults
-param allowed_ports default ["80", "443"]
-param restricted_ports default ["22", "3389"]
-param trusted_cidrs default ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
+param environment default "dev"
+param allowed_public_ports default [80, 443]
+param allowed_admin_cidrs default ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
+param require_vpc_flow_logs default true
+param enforce_waf_on_alb default true
 
-# Helper function to validate network security
-validate_network_security = func(security_group) {
+# Comprehensive network security validation with multiple layers
+validate_network_security = func(resource) {
+    # Input validation - fail secure on null/undefined
+    if resource is null {
+        print("SECURITY ERROR: Network resource validation failed - null resource detected")
+        return false
+    }
+    
+    if resource.change is null {
+        print("SECURITY ERROR: Resource change is null for:", resource.address else "unknown")
+        return false
+    }
+    
     violations = []
-
-    # Input validation
-    if security_group is null {
-        print("Error: Security group is null")
-        return false
+    resource_type = resource.type else "unknown"
+    resource_address = resource.address else "unknown"
+    
+    # Check for computed values - handle gracefully but securely
+    if resource.change.after is computed {
+        print("WARNING: Network resource attributes are computed for", resource_address, "- applying conservative validation")
+        return validate_network_with_computed_values(resource)
     }
-
-    # Validate ingress rules
-    ingress_rules = security_group.change.after.ingress else []
-    for ingress_rules as idx, rule {
-        # Type validation
-        if rule is null {
-            print("Error: Ingress rule", idx, "is null")
-            continue
-        }
-
-        # Validate CIDR blocks
-        cidr_blocks = rule.cidr_blocks else []
-        for cidr_blocks as cidr {
-            if cidr is "0.0.0.0/0" {
-                from_port = rule.from_port
-                to_port = rule.to_port
-
-                # Check for restricted ports
-                if from_port in restricted_ports {
-                    append(violations, "Security group " + security_group.address + 
-                          " allows restricted port " + from_port + " from 0.0.0.0/0")
-                }
-
-                # Validate allowed ports
-                if str(from_port) not in allowed_ports {
-                    append(violations, "Security group " + security_group.address + 
-                          " allows unauthorized port " + from_port + " from 0.0.0.0/0")
-                }
-            }
-        }
+    
+    # Security Group Validation
+    if resource_type is "aws_security_group" {
+        violations = append(violations, validate_security_group_rules(resource)...)
     }
-
-    # Log violations
+    
+    # Security Group Rule Validation (standalone rules)
+    if resource_type in ["aws_security_group_rule", "aws_vpc_security_group_ingress_rule", "aws_vpc_security_group_egress_rule"] {
+        violations = append(violations, validate_standalone_sg_rule(resource)...)
+    }
+    
+    # NACL Validation
+    if resource_type is "aws_network_acl" {
+        violations = append(violations, validate_nacl_rules(resource)...)
+    }
+    
+    # VPC Validation
+    if resource_type is "aws_vpc" {
+        violations = append(violations, validate_vpc_security(resource)...)
+    }
+    
+    # Subnet Validation
+    if resource_type is "aws_subnet" {
+        violations = append(violations, validate_subnet_security(resource)...)
+    }
+    
+    # Load Balancer Validation
+    if resource_type in ["aws_lb", "aws_alb", "aws_elb"] {
+        violations = append(violations, validate_load_balancer_security(resource)...)
+    }
+    
+    # API Gateway Validation
+    if resource_type in ["aws_api_gateway_rest_api", "aws_apigatewayv2_api"] {
+        violations = append(violations, validate_api_gateway_security(resource)...)
+    }
+    
+    # Network Interface Validation
+    if resource_type is "aws_network_interface" {
+        violations = append(violations, validate_network_interface_security(resource)...)
+    }
+    
+    # Report violations with detailed context
     if length(violations) > 0 {
-        print("Network security violations found:")
+        print("NETWORK SECURITY POLICY VIOLATIONS found for", resource_address + ":")
         for violations as violation {
-            print("  -", violation)
+            print("  - VIOLATION:", violation)
         }
         return false
     }
-
+    
     return true
 }
 
-# Filter security group resources
-security_groups = filter tfplan.resource_changes as _, rc {
+# Security Group Rules Validation with comprehensive checks
+validate_security_group_rules = func(resource) {
+    violations = []
+    resource_after = resource.change.after else {}
+    
+    # Validate ingress rules
+    ingress_rules = resource_after.ingress else []
+    for ingress_rules as rule {
+        violations = append(violations, validate_ingress_rule(rule, resource.address)...)
+    }
+    
+    # Validate egress rules
+    egress_rules = resource_after.egress else []
+    violations = append(violations, validate_egress_rules(egress_rules, resource.address)...)
+    
+    # Check for overly permissive rules
+    violations = append(violations, check_overly_permissive_sg(resource_after, resource.address)...)
+    
+    return violations
+}
+
+# Ingress Rule Validation
+validate_ingress_rule = func(rule, resource_address) {
+    violations = []
+    
+    cidr_blocks = rule.cidr_blocks else []
+    ipv6_cidr_blocks = rule.ipv6_cidr_blocks else []
+    security_groups = rule.security_groups else []
+    
+    from_port = rule.from_port else 0
+    to_port = rule.to_port else 0
+    protocol = rule.protocol else ""
+    
+    # Check for open access to dangerous ports
+    if "0.0.0.0/0" in cidr_blocks or "::/0" in ipv6_cidr_blocks {
+        # SSH access
+        if (from_port <= 22 and to_port >= 22) or protocol is "tcp" and from_port is 22 {
+            append(violations, "SSH port 22 cannot be open to 0.0.0.0/0")
+        }
+        
+        # RDP access
+        if (from_port <= 3389 and to_port >= 3389) or protocol is "tcp" and from_port is 3389 {
+            append(violations, "RDP port 3389 cannot be open to 0.0.0.0/0")
+        }
+        
+        # Database ports
+        database_ports = [3306, 5432, 1433, 1521, 27017, 6379]
+        for database_ports as db_port {
+            if from_port <= db_port and to_port >= db_port {
+                append(violations, "Database port " + string(db_port) + " cannot be open to 0.0.0.0/0")
+            }
+        }
+        
+        # Administrative ports
+        admin_ports = [5986, 5985, 2376, 2377, 4243, 4244, 6443, 8080, 9090, 9200]
+        for admin_ports as admin_port {
+            if from_port <= admin_port and to_port >= admin_port {
+                append(violations, "Administrative port " + string(admin_port) + " cannot be open to 0.0.0.0/0")
+            }
+        }
+        
+        # Only allow specific public ports
+        if not (from_port in allowed_public_ports and to_port in allowed_public_ports) {
+            if not (from_port is 80 and to_port is 80) and not (from_port is 443 and to_port is 443) {
+                append(violations, "Port range " + string(from_port) + "-" + string(to_port) + " cannot be open to 0.0.0.0/0")
+            }
+        }
+    }
+    
+    # Check for overly broad port ranges
+    if to_port - from_port > 1000 {
+        append(violations, "Port range too broad: " + string(from_port) + "-" + string(to_port))
+    }
+    
+    # Validate CIDR blocks are not overly permissive
+    for cidr_blocks as cidr {
+        if strings.has_suffix(cidr, "/0") and cidr is not "0.0.0.0/0" {
+            append(violations, "Suspicious CIDR block: " + cidr)
+        }
+        
+        # Check for RFC1918 violations in production
+        if environment is "prod" and not is_rfc1918(cidr) and cidr is not "0.0.0.0/0" {
+            append(violations, "Production environment should primarily use RFC1918 addresses")
+        }
+    }
+    
+    return violations
+}
+
+# Egress Rules Validation
+validate_egress_rules = func(egress_rules, resource_address) {
+    violations = []
+    
+    # Check for overly permissive egress
+    for egress_rules as rule {
+        cidr_blocks = rule.cidr_blocks else []
+        from_port = rule.from_port else 0
+        to_port = rule.to_port else 0
+        protocol = rule.protocol else ""
+        
+        # Flag completely open egress in production
+        if environment is "prod" and "0.0.0.0/0" in cidr_blocks {
+            if protocol is "-1" or (from_port is 0 and to_port is 65535) {
+                append(violations, "Production security groups should not have unrestricted egress")
+            }
+        }
+    }
+    
+    return violations
+}
+
+# Check for overly permissive security group configurations
+check_overly_permissive_sg = func(resource_after, resource_address) {
+    violations = []
+    
+    # Check if security group has no rules
+    ingress_rules = resource_after.ingress else []
+    egress_rules = resource_after.egress else []
+    
+    if length(ingress_rules) == 0 and length(egress_rules) == 0 {
+        append(violations, "Security group has no rules defined - may inherit permissive defaults")
+    }
+    
+    return violations
+}
+
+# Standalone Security Group Rule Validation
+validate_standalone_sg_rule = func(resource) {
+    violations = []
+    resource_after = resource.change.after else {}
+    
+    rule_type = resource_after.type else ""
+    cidr_blocks = resource_after.cidr_blocks else []
+    from_port = resource_after.from_port else 0
+    to_port = resource_after.to_port else 0
+    protocol = resource_after.protocol else ""
+    
+    if rule_type is "ingress" {
+        violations = append(violations, validate_ingress_rule(resource_after, resource.address)...)
+    }
+    
+    return violations
+}
+
+# NACL Rules Validation
+validate_nacl_rules = func(resource) {
+    violations = []
+    resource_after = resource.change.after else {}
+    
+    ingress_rules = resource_after.ingress else []
+    egress_rules = resource_after.egress else []
+    
+    # Validate NACL rule ordering and conflicts
+    violations = append(violations, validate_nacl_rule_ordering(ingress_rules, "ingress")...)
+    violations = append(violations, validate_nacl_rule_ordering(egress_rules, "egress")...)
+    
+    return violations
+}
+
+# NACL Rule Ordering Validation
+validate_nacl_rule_ordering = func(rules, direction) {
+    violations = []
+    
+    # Check for conflicting rules and proper ordering
+    rule_numbers = []
+    for rules as rule {
+        rule_number = rule.rule_number else 0
+        action = rule.action else ""
+        
+        if rule_number in rule_numbers {
+            append(violations, "Duplicate NACL rule number: " + string(rule_number))
+        }
+        append(rule_numbers, rule_number)
+        
+        # Check for deny rules with low numbers that might block necessary traffic
+        if action is "deny" and rule_number < 100 {
+            append(violations, "NACL deny rule with low number may block necessary traffic: " + string(rule_number))
+        }
+    }
+    
+    return violations
+}
+
+# VPC Security Validation
+validate_vpc_security = func(resource) {
+    violations = []
+    resource_after = resource.change.after else {}
+    
+    # Check DNS settings
+    enable_dns_hostnames = resource_after.enable_dns_hostnames else false
+    enable_dns_support = resource_after.enable_dns_support else true
+    
+    if enable_dns_hostnames and not enable_dns_support {
+        append(violations, "VPC DNS hostnames enabled but DNS support disabled")
+    }
+    
+    # Check for default VPC usage in production
+    if environment is "prod" {
+        cidr_block = resource_after.cidr_block else ""
+        if cidr_block is "172.31.0.0/16" {
+            append(violations, "Production workloads should not use default VPC")
+        }
+    }
+    
+    return violations
+}
+
+# Subnet Security Validation
+validate_subnet_security = func(resource) {
+    violations = []
+    resource_after = resource.change.after else {}
+    
+    # Check public subnet configuration
+    map_public_ip_on_launch = resource_after.map_public_ip_on_launch else false
+    
+    if map_public_ip_on_launch {
+        # This might be acceptable for public subnets, but flag for review
+        append(violations, "Subnet configured to assign public IPs - ensure this is intentional")
+    }
+    
+    return violations
+}
+
+# Load Balancer Security Validation
+validate_load_balancer_security = func(resource) {
+    violations = []
+    resource_after = resource.change.after else {}
+    
+    load_balancer_type = resource_after.load_balancer_type else "classic"
+    internal = resource_after.internal else false
+    
+    # Check for internet-facing load balancers in production
+    if environment is "prod" and not internal {
+        append(violations, "Production load balancers should be carefully reviewed for internet exposure")
+    }
+    
+    # Check for ALB without WAF
+    if enforce_waf_on_alb and load_balancer_type is "application" and not internal {
+        # Note: WAF association is typically configured separately
+        append(violations, "Internet-facing ALB should have WAF protection")
+    }
+    
+    return violations
+}
+
+# API Gateway Security Validation
+validate_api_gateway_security = func(resource) {
+    violations = []
+    resource_after = resource.change.after else {}
+    
+    # Check for API Gateway without authentication
+    # Note: Authentication is typically configured on methods/resources
+    protocol_type = resource_after.protocol_type else "REST"
+    
+    if protocol_type is "HTTP" {
+        append(violations, "HTTP API Gateway may lack security features - consider REST API")
+    }
+    
+    return violations
+}
+
+# Network Interface Security Validation
+validate_network_interface_security = func(resource) {
+    violations = []
+    resource_after = resource.change.after else {}
+    
+    # Check source/destination check
+    source_dest_check = resource_after.source_dest_check else true
+    if not source_dest_check {
+        append(violations, "Network interface with source/dest check disabled - ensure this is required")
+    }
+    
+    return violations
+}
+
+# Helper function to check RFC1918 addresses
+is_rfc1918 = func(cidr) {
+    return strings.has_prefix(cidr, "10.") or 
+           strings.has_prefix(cidr, "172.16.") or 
+           strings.has_prefix(cidr, "172.17.") or 
+           strings.has_prefix(cidr, "172.18.") or 
+           strings.has_prefix(cidr, "172.19.") or 
+           strings.has_prefix(cidr, "172.20.") or 
+           strings.has_prefix(cidr, "172.21.") or 
+           strings.has_prefix(cidr, "172.22.") or 
+           strings.has_prefix(cidr, "172.23.") or 
+           strings.has_prefix(cidr, "172.24.") or 
+           strings.has_prefix(cidr, "172.25.") or 
+           strings.has_prefix(cidr, "172.26.") or 
+           strings.has_prefix(cidr, "172.27.") or 
+           strings.has_prefix(cidr, "172.28.") or 
+           strings.has_prefix(cidr, "172.29.") or 
+           strings.has_prefix(cidr, "172.30.") or 
+           strings.has_prefix(cidr, "172.31.") or 
+           strings.has_prefix(cidr, "192.168.")
+}
+
+# Handle computed values securely
+validate_network_with_computed_values = func(resource) {
+    print("INFO: Applying conservative network validation for computed resource:", resource.address else "unknown")
+    
+    resource_type = resource.type else "unknown"
+    
+    # Only allow known secure network resource types with computed values
+    allowed_computed_network_types = [
+        "aws_security_group",
+        "aws_vpc",
+        "aws_subnet",
+        "aws_network_acl"
+    ]
+    
+    if resource_type not in allowed_computed_network_types {
+        print("SECURITY WARNING: Computed network resource type not in approved list:", resource_type)
+        return false
+    }
+    
+    return true
+}
+
+# Efficient resource filtering for network security
+network_security_resources = filter tfplan.resource_changes as _, rc {
     rc.mode is "managed" and
-    rc.type is "aws_security_group" and
+    rc.type in [
+        "aws_security_group",
+        "aws_security_group_rule",
+        "aws_vpc_security_group_ingress_rule",
+        "aws_vpc_security_group_egress_rule",
+        "aws_network_acl",
+        "aws_vpc",
+        "aws_subnet",
+        "aws_lb",
+        "aws_alb", 
+        "aws_elb",
+        "aws_api_gateway_rest_api",
+        "aws_apigatewayv2_api",
+        "aws_network_interface"
+    ] and
     rc.change.actions is not ["delete"]
 }
 
-# Main rule enforcing network security
-main = rule {
-    all security_groups as _, sg {
-        validate_network_security(sg)
+# Main rule with comprehensive validation and fail-secure defaults
+main = rule when length(network_security_resources) > 0 {
+    all network_security_resources as _, resource {
+        validate_network_security(resource)
     }
 }
